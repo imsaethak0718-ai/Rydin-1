@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { supabase } from "@/integrations/supabase/client";
 import type { User as SupabaseUser, Session } from "@supabase/supabase-js";
 
-interface Profile {
+export interface Profile {
   id: string;
   email: string;
   name: string;
@@ -23,6 +23,7 @@ interface AuthContextType {
   signup: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<Profile>) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchProfile = async (supabaseUser: SupabaseUser) => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", supabaseUser.id)
@@ -52,7 +53,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile_complete: data.profile_complete ?? false,
       });
     } else {
-      // Profile not yet created (trigger should handle this, but fallback)
       setUser({
         id: supabaseUser.id,
         email: supabaseUser.email || "",
@@ -64,27 +64,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Listen for auth changes FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session);
-        if (session?.user) {
-          // Use setTimeout to avoid potential deadlocks with Supabase
-          setTimeout(() => fetchProfile(session.user), 0);
+      async (_event, newSession) => {
+        setSession(newSession);
+        if (newSession?.user) {
+          setTimeout(() => fetchProfile(newSession.user), 0);
         } else {
           setUser(null);
+          setIsLoading(false);
         }
-        setIsLoading(false);
       }
     );
 
-    // Then check existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        fetchProfile(session.user);
+    supabase.auth.getSession().then(({ data: { session: existingSession } }) => {
+      setSession(existingSession);
+      if (existingSession?.user) {
+        fetchProfile(existingSession.user).finally(() => setIsLoading(false));
+      } else {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     });
 
     return () => subscription.unsubscribe();
@@ -120,18 +118,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateProfile = async (data: Partial<Profile>) => {
     if (!session?.user) return;
-    const updates = {
-      ...data,
-      profile_complete: true,
-      updated_at: new Date().toISOString(),
-    };
+    const updates: Record<string, unknown> = { ...data, profile_complete: true, updated_at: new Date().toISOString() };
     const { error } = await supabase
       .from("profiles")
       .update(updates)
       .eq("id", session.user.id);
     if (error) throw error;
+    setUser((prev) => prev ? { ...prev, ...updates } as Profile : null);
+  };
 
-    setUser((prev) => prev ? { ...prev, ...updates } : null);
+  const refreshProfile = async () => {
+    if (session?.user) await fetchProfile(session.user);
   };
 
   return (
@@ -145,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signup,
         logout,
         updateProfile,
+        refreshProfile,
       }}
     >
       {children}
