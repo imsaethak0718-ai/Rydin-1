@@ -61,9 +61,6 @@ export const useRealtimeRides = (filters?: {
 
         const { data: ridesData, error: fetchError } = await query.order("created_at", {
           ascending: false,
-        }).catch(err => {
-          console.error("Query execution failed:", err);
-          throw err;
         });
 
         if (fetchError) {
