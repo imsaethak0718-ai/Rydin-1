@@ -12,19 +12,21 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user } = useAuth();
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, user, isLoading } = useAuth();
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-background"><p className="text-muted-foreground">Loading...</p></div>;
   if (!isAuthenticated) return <Navigate to="/auth" replace />;
   if (user && !user.profile_complete) return <Navigate to="/profile-setup" replace />;
   return <>{children}</>;
-}
+};
 
-function AuthRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, user } = useAuth();
+const AuthRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, user, isLoading } = useAuth();
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-background"><p className="text-muted-foreground">Loading...</p></div>;
   if (isAuthenticated && user?.profile_complete) return <Navigate to="/" replace />;
   if (isAuthenticated && !user?.profile_complete) return <Navigate to="/profile-setup" replace />;
   return <>{children}</>;
-}
+};
 
 const AppRoutes = () => (
   <Routes>
