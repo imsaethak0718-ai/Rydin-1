@@ -10,6 +10,8 @@ export interface Profile {
   year?: string;
   phone?: string;
   gender?: "male" | "female" | "other";
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
   trust_score: number;
   profile_complete: boolean;
 }
@@ -49,6 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         year: data.year,
         phone: data.phone,
         gender: data.gender,
+        emergency_contact_name: data.emergency_contact_name,
+        emergency_contact_phone: data.emergency_contact_phone,
         trust_score: data.trust_score ?? 4.0,
         profile_complete: data.profile_complete ?? false,
       });
@@ -59,6 +63,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         name: "",
         trust_score: 4.0,
         profile_complete: false,
+        emergency_contact_name: undefined,
+        emergency_contact_phone: undefined,
       });
     }
   };

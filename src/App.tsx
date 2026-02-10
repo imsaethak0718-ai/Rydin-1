@@ -8,6 +8,9 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ProfileSetup from "./pages/ProfileSetup";
 import CreateRide from "./pages/CreateRide";
+import Profile from "./pages/Profile";
+import Chat from "./pages/Chat";
+import Search from "./pages/Search";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -34,6 +37,9 @@ const AppRoutes = () => (
     <Route path="/profile-setup" element={<ProfileSetup />} />
     <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
     <Route path="/create" element={<ProtectedRoute><CreateRide /></ProtectedRoute>} />
+    <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
+    <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+    <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

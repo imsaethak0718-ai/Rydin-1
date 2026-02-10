@@ -37,9 +37,11 @@ const CreateRide = () => {
       date,
       time,
       seats_total: parseInt(seatsTotal),
+      seats_taken: 0,
       estimated_fare: parseFloat(estimatedFare),
       girls_only: girlsOnly,
       flight_train: flightTrain || null,
+      status: 'open',
     });
 
     setIsSubmitting(false);
@@ -54,49 +56,49 @@ const CreateRide = () => {
   return (
     <div className="min-h-screen bg-background pb-20">
       <header className="sticky top-0 bg-background/80 backdrop-blur-md z-40 border-b border-border">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
+        <div className="max-w-lg mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground p-1 -ml-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-lg font-bold font-display">Create a Ride</h1>
+          <h1 className="text-lg sm:text-xl font-bold font-display">Create a Ride</h1>
         </div>
       </header>
 
       <motion.main
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-lg mx-auto px-4 py-6"
+        className="max-w-lg mx-auto px-4 sm:px-6 py-6"
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Pickup point (e.g., SRM Campus)" className="pl-10 h-12 bg-card" required value={source} onChange={(e) => setSource(e.target.value)} />
+            <Input placeholder="Pickup point (e.g., SRM Campus)" className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm" required value={source} onChange={(e) => setSource(e.target.value)} />
           </div>
 
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
-            <Input placeholder="Destination (e.g., Chennai Airport)" className="pl-10 h-12 bg-card" required value={destination} onChange={(e) => setDestination(e.target.value)} />
+            <Input placeholder="Destination (e.g., Chennai Airport)" className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm" required value={destination} onChange={(e) => setDestination(e.target.value)} />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             <div className="relative">
               <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input type="date" className="pl-10 h-12 bg-card" required value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input type="date" className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm" required value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div className="relative">
               <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input type="time" className="pl-10 h-12 bg-card" required value={time} onChange={(e) => setTime(e.target.value)} />
+              <Input type="time" className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm" required value={time} onChange={(e) => setTime(e.target.value)} />
             </div>
           </div>
 
           <div className="relative">
             <Plane className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Flight/Train number (optional)" className="pl-10 h-12 bg-card" value={flightTrain} onChange={(e) => setFlightTrain(e.target.value)} />
+            <Input placeholder="Flight/Train number (optional)" className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm" value={flightTrain} onChange={(e) => setFlightTrain(e.target.value)} />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             <Select required value={seatsTotal} onValueChange={setSeatsTotal}>
-              <SelectTrigger className="h-12 bg-card">
+              <SelectTrigger className="h-12 sm:h-11 bg-card text-base sm:text-sm">
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4 text-muted-foreground" />
                   <SelectValue placeholder="Max seats" />
@@ -111,19 +113,19 @@ const CreateRide = () => {
 
             <div className="relative">
               <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input type="number" placeholder="Est. fare" className="pl-10 h-12 bg-card" required value={estimatedFare} onChange={(e) => setEstimatedFare(e.target.value)} />
+              <Input type="number" placeholder="Est. fare" className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm" required value={estimatedFare} onChange={(e) => setEstimatedFare(e.target.value)} />
             </div>
           </div>
 
-          <div className="flex items-center justify-between bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center justify-between bg-card border border-border rounded-xl p-3 sm:p-4">
             <div className="flex items-center gap-2">
               <Shield className="w-4 h-4 text-safety" />
-              <span className="text-sm font-medium">Girls-only ride</span>
+              <span className="text-sm sm:text-base font-medium">Girls-only ride</span>
             </div>
             <Switch checked={girlsOnly} onCheckedChange={setGirlsOnly} />
           </div>
 
-          <Button type="submit" className="w-full h-12 text-base font-semibold" disabled={isSubmitting}>
+          <Button type="submit" className="w-full h-12 sm:h-11 text-base sm:text-sm font-semibold" disabled={isSubmitting}>
             {isSubmitting ? "Creating..." : "Create Ride"}
           </Button>
         </form>

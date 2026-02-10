@@ -12,6 +12,8 @@ export interface Ride {
   hostName: string;
   hostRating: number;
   hostDepartment: string;
+  hostId?: string;
+  status?: string;
 }
 
 export const mockRides: Ride[] = [
