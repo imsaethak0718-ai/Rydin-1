@@ -1,16 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { firebaseAuth } from "@/integrations/firebase/config";
-import { 
-  GoogleAuthProvider, 
-  signInWithPopup, 
-  signOut as firebaseSignOut,
-  onAuthStateChanged,
-  User as FirebaseUser,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-  ConfirmationResult,
-} from "firebase/auth";
 import type { User as SupabaseUser, Session } from "@supabase/supabase-js";
 
 export interface Profile {
@@ -30,19 +19,13 @@ export interface Profile {
 
 interface AuthContextType {
   user: Profile | null;
-  firebaseUser: FirebaseUser | null;
   session: Session | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  isPhoneVerified: boolean;
-  
+
   // Google OAuth
   loginWithGoogle: () => Promise<void>;
-  
-  // Phone Auth
-  sendPhoneOTP: (phoneNumber: string) => Promise<ConfirmationResult | null>;
-  verifyPhoneOTP: (confirmationResult: ConfirmationResult | null, otp: string) => Promise<void>;
-  
+
   // Profile
   logout: () => Promise<void>;
   updateProfile: (data: Partial<Profile>) => Promise<void>;
@@ -52,40 +35,22 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<Profile | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
-  const [recaptchaVerifier, setRecaptchaVerifier] = useState<RecaptchaVerifier | null>(null);
 
-  // Initialize reCAPTCHA verifier
-  const initRecaptcha = () => {
-    try {
-      const verifier = new RecaptchaVerifier(firebaseAuth, 'recaptcha-container', {
-        size: 'normal',
-        callback: () => console.log('reCAPTCHA verified'),
-        'expired-callback': () => console.log('reCAPTCHA expired'),
-      });
-      setRecaptchaVerifier(verifier);
-      return verifier;
-    } catch (error) {
-      console.error('Error initializing reCAPTCHA:', error);
-      return null;
-    }
-  };
-
-  const fetchProfile = async (firebaseUserData: FirebaseUser) => {
+  const fetchProfile = async (supabaseUserData: SupabaseUser) => {
     try {
       const { data } = await supabase
         .from("profiles")
         .select("*")
-        .eq("id", firebaseUserData.uid)
+        .eq("id", supabaseUserData.id)
         .maybeSingle();
 
       if (data) {
         const profileData: Profile = {
           id: data.id,
-          email: firebaseUserData.email || "",
+          email: supabaseUserData.email || "",
           name: data.name || "",
           phone: data.phone,
           department: data.department,
@@ -98,27 +63,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           phone_verified: data.phone_verified ?? false,
         };
         setUser(profileData);
-        setIsPhoneVerified(profileData.phone_verified);
       } else {
         // New user - create profile entry
         const newProfile: Profile = {
-          id: firebaseUserData.uid,
-          email: firebaseUserData.email || "",
-          name: firebaseUserData.displayName || "",
+          id: supabaseUserData.id,
+          email: supabaseUserData.email || "",
+          name: supabaseUserData.user_metadata?.full_name || "",
           trust_score: 4.0,
           profile_complete: false,
           phone_verified: false,
         };
-        
+
         await supabase.from("profiles").insert({
-          id: firebaseUserData.uid,
-          email: firebaseUserData.email,
-          name: firebaseUserData.displayName,
+          id: supabaseUserData.id,
+          email: supabaseUserData.email,
+          name: supabaseUserData.user_metadata?.full_name || "",
           trust_score: 4.0,
           profile_complete: false,
           phone_verified: false,
         });
-        
+
         setUser(newProfile);
       }
     } catch (error) {
@@ -126,107 +90,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Listen to Firebase auth state
+  // Listen to Supabase auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUserData) => {
-      if (firebaseUserData) {
-        setFirebaseUser(firebaseUserData);
-        await fetchProfile(firebaseUserData);
-      } else {
-        setFirebaseUser(null);
-        setUser(null);
-        setIsPhoneVerified(false);
+    let mounted = true;
+
+    // Get initial session
+    const initializeAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (mounted) {
+        setSession(session);
+        if (session?.user) {
+          await fetchProfile(session.user);
+        }
+        setIsLoading(false);
       }
-      setIsLoading(false);
+    };
+
+    initializeAuth();
+
+    // Listen to auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (mounted) {
+        setSession(session);
+        if (session?.user) {
+          await fetchProfile(session.user);
+        } else {
+          setUser(null);
+        }
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   // Google OAuth Login
   const loginWithGoogle = async () => {
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: 'select_account'
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth-callback`,
+        }
       });
-      
-      const result = await signInWithPopup(firebaseAuth, provider);
-      await fetchProfile(result.user);
+
+      if (error) throw error;
     } catch (error: any) {
       console.error("Google login error:", error);
       throw new Error(error.message || "Failed to login with Google");
     }
   };
 
-  // Send Phone OTP
-  const sendPhoneOTP = async (phoneNumber: string): Promise<ConfirmationResult | null> => {
-    try {
-      if (!firebaseUser) {
-        throw new Error("User must be authenticated to verify phone");
-      }
-
-      // Ensure phone number is in E.164 format
-      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`;
-
-      let verifier = recaptchaVerifier;
-      if (!verifier) {
-        verifier = initRecaptcha();
-      }
-
-      if (!verifier) {
-        throw new Error("reCAPTCHA not initialized");
-      }
-
-      const confirmationResult = await signInWithPhoneNumber(
-        firebaseAuth,
-        formattedPhone,
-        verifier
-      );
-
-      return confirmationResult;
-    } catch (error: any) {
-      console.error("Phone OTP error:", error);
-      throw new Error(error.message || "Failed to send OTP");
-    }
-  };
-
-  // Verify Phone OTP
-  const verifyPhoneOTP = async (confirmationResult: ConfirmationResult | null, otp: string) => {
-    try {
-      if (!confirmationResult) {
-        throw new Error("No confirmation result available");
-      }
-
-      if (!firebaseUser) {
-        throw new Error("User not authenticated");
-      }
-
-      await confirmationResult.confirm(otp);
-
-      // Update profile in Supabase to mark phone as verified
-      await supabase
-        .from("profiles")
-        .update({
-          phone_verified: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", firebaseUser.uid);
-
-      setIsPhoneVerified(true);
-      await fetchProfile(firebaseUser);
-    } catch (error: any) {
-      console.error("OTP verification error:", error);
-      throw new Error(error.message || "Failed to verify OTP");
-    }
-  };
 
   const logout = async () => {
     try {
-      await firebaseSignOut(firebaseAuth);
-      setFirebaseUser(null);
+      await supabase.auth.signOut();
+      setSession(null);
       setUser(null);
-      setIsPhoneVerified(false);
     } catch (error) {
       console.error("Logout error:", error);
       throw error;
@@ -234,8 +156,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProfile = async (data: Partial<Profile>) => {
-    if (!firebaseUser) return;
-    
+    if (!session?.user) return;
+
     try {
       const updates: Record<string, unknown> = {
         ...data,
@@ -246,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase
         .from("profiles")
         .update(updates)
-        .eq("id", firebaseUser.uid);
+        .eq("id", session.user.id);
 
       if (error) throw error;
 
@@ -258,27 +180,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshProfile = async () => {
-    if (firebaseUser) await fetchProfile(firebaseUser);
+    if (session?.user) await fetchProfile(session.user);
   };
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        firebaseUser,
-        session: null,
-        isAuthenticated: !!firebaseUser,
+        session,
+        isAuthenticated: !!session?.user,
         isLoading,
-        isPhoneVerified,
         loginWithGoogle,
-        sendPhoneOTP,
-        verifyPhoneOTP,
         logout,
         updateProfile,
         refreshProfile,
       }}
     >
-      <div id="recaptcha-container" />
       {children}
     </AuthContext.Provider>
   );

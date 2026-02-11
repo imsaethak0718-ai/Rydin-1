@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import AuthCallback from "./pages/AuthCallback";
 import SMSVerification from "./pages/SMSVerification";
 import ProfileSetup from "./pages/ProfileSetup";
 import CreateRide from "./pages/CreateRide";
@@ -64,6 +65,7 @@ const AuthRoute = ({ children }: { children: React.ReactNode }) => {
 const AppRoutes = () => (
   <Routes>
     <Route path="/auth" element={<AuthRoute><Auth /></AuthRoute>} />
+    <Route path="/auth-callback" element={<AuthCallback />} />
     <Route path="/sms-verification" element={<ProtectedRoute><SMSVerification /></ProtectedRoute>} />
     <Route path="/profile-setup" element={<ProtectedRoute><ProfileSetup /></ProtectedRoute>} />
     <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
