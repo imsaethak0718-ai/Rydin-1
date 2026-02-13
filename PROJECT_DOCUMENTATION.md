@@ -10,10 +10,10 @@ Rydin is a peer-to-peer rideshare platform designed specifically for college stu
 ### WORKING ✅
 
 #### Authentication
-- Email/Password signup and login
+- Email/Password signup and login via Supabase
 - Session persistence with localStorage
 - Profile-based user identification
-- Google and Firebase integration ready (keys configured)
+- Future: OAuth providers can be enabled in Supabase
 
 #### Core Ride Features
 - **Create Rides**: Users can create new rides (source → destination)
@@ -119,13 +119,15 @@ Rydin is a peer-to-peer rideshare platform designed specifically for college stu
 
 ## ENVIRONMENT VARIABLES CONFIGURED ✅
 
+Only Supabase is now configured. No Firebase or Google OAuth dependencies.
+
 ```
 VITE_SUPABASE_URL=https://ylyxhdlncslvqdkhzohs.supabase.co
-VITE_SUPABASE_ANON_KEY=[JWT token]
-VITE_SUPABASE_PUBLISHABLE_KEY=[key]
-VITE_GOOGLE_CLIENT_ID=[Google OAuth]
-VITE_FIREBASE_*=[Firebase config 9 keys]
+VITE_SUPABASE_ANON_KEY=[JWT token from Supabase]
+VITE_SUPABASE_PUBLISHABLE_KEY=[Publishable key from Supabase]
 ```
+
+See `.env.example` for template.
 
 ---
 
@@ -136,6 +138,12 @@ VITE_FIREBASE_*=[Firebase config 9 keys]
 2. Removed lovable-tagger dependency
 3. Fixed auth redirect flow (no more profile setup loop)
 4. Verified RLS policies for rides table
+
+### Session 2
+1. Removed all Firebase environment variables
+2. Removed all Google OAuth configuration
+3. Simplified to Supabase-only authentication
+4. Created .env.example with clean template
 
 ---
 
@@ -151,9 +159,10 @@ VITE_FIREBASE_*=[Firebase config 9 keys]
 - Lucide Icons
 
 **Backend**
-- Supabase (PostgreSQL + PostgREST API)
+- Supabase (PostgreSQL + PostgREST API + Auth)
 - Real-time subscriptions via WebSockets
 - Row Level Security (RLS) policies
+- Email/Password authentication (Supabase Auth)
 
 **Dev Tools**
 - ESLint 9.32.0
@@ -198,8 +207,8 @@ npm test
 2. Complete payment integration (Stripe)
 3. Implement ride lock mechanism
 4. Test all RLS policies with real users
-5. Set up email notifications
-6. Configure Google/Firebase OAuth properly
+5. Set up email notifications via Supabase
+6. Configure OAuth in Supabase (if needed in future)
 7. Reorganize project structure (frontend/backend)
 8. Add comprehensive error logging
 9. Set up analytics tracking
@@ -213,10 +222,12 @@ npm test
 - [x] Foreign keys configured
 - [x] RLS policies enabled
 - [x] Real-time subscriptions enabled
-- [ ] Email verification enabled
-- [ ] Custom JWT claims for authorization
+- [x] Email/Password authentication configured
+- [ ] Email verification enabled (optional)
+- [ ] Custom JWT claims for authorization (if needed)
 - [ ] Backup strategy configured
 - [ ] Monitoring/alerts configured
+- [ ] OAuth providers configured (if needed)
 
 ---
 
