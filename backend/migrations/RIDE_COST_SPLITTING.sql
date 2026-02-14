@@ -1,283 +1,303 @@
--- ================================================================
--- RIDE COST SPLITTING PLATFORM DATABASE SCHEMA
--- Support for Uber, Ola, Rapido, and other ride services
--- ================================================================
+-- ============================================
+-- COST SPLITTING FEATURE - DATABASE SCHEMA
+-- ============================================
 
--- 1. ID Verifications table
+-- 1. ID VERIFICATIONS TABLE
+-- Stores student ID verification data
 CREATE TABLE IF NOT EXISTS id_verifications (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL UNIQUE REFERENCES profiles(id) ON DELETE CASCADE,
-  id_image_url TEXT NOT NULL,
-  extracted_name TEXT,
-  extracted_id_number TEXT,
-  college_name TEXT,
-  verified_at TIMESTAMP,
-  verification_status TEXT DEFAULT 'verified' CHECK (verification_status IN ('pending', 'verified', 'rejected')),
-  is_valid BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMP DEFAULT NOW()
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  id_number TEXT NOT NULL UNIQUE,
+  college_name TEXT NOT NULL,
+  photo_url TEXT,
+  verified BOOLEAN DEFAULT FALSE,
+  verification_date TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 2. Ride Links table (parsed from Uber/Ola/Rapido)
+-- 2. RIDE LINKS TABLE
+-- Stores parsed Uber/Ola/Rapido ride information
 CREATE TABLE IF NOT EXISTS ride_links (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  platform TEXT NOT NULL,  -- 'uber', 'ola', 'rapido', 'other'
-  original_link TEXT NOT NULL,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL CHECK (platform IN ('uber', 'ola', 'rapido')),
+  original_url TEXT NOT NULL,
   pickup_location TEXT NOT NULL,
   dropoff_location TEXT NOT NULL,
-  ride_type TEXT,  -- 'UberX', 'Uber Prime', 'Ola', 'Rapido', etc.
-  base_price DECIMAL(10, 2),
+  ride_type TEXT,
   total_price DECIMAL(10, 2) NOT NULL,
-  currency TEXT DEFAULT 'INR',
-  estimated_duration INT,  -- in minutes
-  estimated_distance DECIMAL(8, 2),  -- in km
-  raw_metadata JSONB,  -- Store full extracted data
-  extracted_at TIMESTAMP DEFAULT NOW(),
-  created_at TIMESTAMP DEFAULT NOW()
+  estimated_duration_minutes INTEGER,
+  estimated_distance_km DECIMAL(10, 2),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 3. Cost Splits table (shared rides)
+-- 3. COST SPLITS TABLE
+-- Groups of people splitting a ride cost
 CREATE TABLE IF NOT EXISTS cost_splits (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  created_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  ride_link_id UUID REFERENCES ride_links(id) ON DELETE SET NULL,
-  title TEXT,  -- "Airport ride", "Mall trip with friends", etc.
+  ride_link_id UUID NOT NULL REFERENCES ride_links(id) ON DELETE CASCADE,
+  creator_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  title TEXT,
+  share_token TEXT UNIQUE NOT NULL,
   total_amount DECIMAL(10, 2) NOT NULL,
-  split_count INT DEFAULT 1,
-  amount_per_person DECIMAL(10, 2),
-  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'settled', 'expired', 'cancelled')),
-  share_token VARCHAR(32) NOT NULL UNIQUE,  -- For shareable link
-  description TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  expires_at TIMESTAMP DEFAULT (NOW() + INTERVAL '24 hours')
+  per_person_amount DECIMAL(10, 2) NOT NULL,
+  number_of_people INTEGER NOT NULL CHECK (number_of_people >= 2),
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'settled')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. Split Members table (people in the cost split)
+-- 4. SPLIT MEMBERS TABLE
+-- Individual members in a cost split
 CREATE TABLE IF NOT EXISTS split_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   split_id UUID NOT NULL REFERENCES cost_splits(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  name TEXT,
   amount_owed DECIMAL(10, 2) NOT NULL,
-  amount_paid DECIMAL(10, 2) DEFAULT 0,
-  payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'settled')),
-  joined_at TIMESTAMP DEFAULT NOW(),
-  settled_at TIMESTAMP,
-  UNIQUE(split_id, user_id)
+  payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid')),
+  payment_method TEXT CHECK (payment_method IN ('upi', 'cash', 'card', null)),
+  joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  paid_at TIMESTAMP WITH TIME ZONE
 );
 
--- 5. Settlement Transactions (payment tracking)
+-- 5. SETTLEMENTS TABLE
+-- Payment history and settlement tracking
 CREATE TABLE IF NOT EXISTS settlements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  payer_id UUID NOT NULL REFERENCES profiles(id),
-  payee_id UUID NOT NULL REFERENCES profiles(id),
+  from_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  to_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  split_member_id UUID NOT NULL REFERENCES split_members(id) ON DELETE CASCADE,
   amount DECIMAL(10, 2) NOT NULL,
-  split_id UUID REFERENCES cost_splits(id),
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'disputed')),
-  proof_url TEXT,  -- UPI screenshot, receipt, etc.
-  payment_method TEXT,  -- 'upi', 'bank_transfer', 'cash', etc.
-  created_at TIMESTAMP DEFAULT NOW(),
-  completed_at TIMESTAMP
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('upi', 'cash', 'card')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
+  proof_url TEXT,
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  completed_at TIMESTAMP WITH TIME ZONE
 );
 
--- ================================================================
--- RLS POLICIES
--- ================================================================
+-- ============================================
+-- ROW LEVEL SECURITY POLICIES
+-- ============================================
 
--- Enable RLS
+-- ID VERIFICATIONS RLS
 ALTER TABLE id_verifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ride_links ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cost_splits ENABLE ROW LEVEL SECURITY;
-ALTER TABLE split_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE settlements ENABLE ROW LEVEL SECURITY;
-
--- ID Verifications policies
-DROP POLICY IF EXISTS "Users can view their own verification" ON id_verifications;
-DROP POLICY IF EXISTS "Users can create/update their verification" ON id_verifications;
 
 CREATE POLICY "Users can view their own verification"
-ON id_verifications FOR SELECT
-USING (auth.uid() = user_id OR auth.uid() IN (
-  SELECT user_id FROM split_members 
-  WHERE split_id IN (SELECT id FROM cost_splits WHERE created_by = id_verifications.user_id)
-));
+  ON id_verifications
+  FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can create/update their verification"
-ON id_verifications FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own verification"
+  ON id_verifications
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can update their own verification"
-ON id_verifications FOR UPDATE USING (auth.uid() = user_id);
+  ON id_verifications
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
--- Ride Links policies
-DROP POLICY IF EXISTS "Users can view their own ride links" ON ride_links;
-DROP POLICY IF EXISTS "Users can create ride links" ON ride_links;
+-- RIDE LINKS RLS
+ALTER TABLE ride_links ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view their own ride links"
-ON ride_links FOR SELECT
-USING (auth.uid() = user_id OR auth.uid() IN (
-  SELECT user_id FROM split_members 
-  WHERE split_id IN (SELECT id FROM cost_splits WHERE ride_link_id = ride_links.id)
-));
+  ON ride_links
+  FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can create ride links"
-ON ride_links FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own ride links"
+  ON ride_links
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
 
--- Cost Splits policies
-DROP POLICY IF EXISTS "Users can view splits they created" ON cost_splits;
-DROP POLICY IF EXISTS "Users can view splits they joined" ON cost_splits;
-DROP POLICY IF EXISTS "Users can create splits" ON cost_splits;
+-- COST SPLITS RLS
+ALTER TABLE cost_splits ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view splits they created"
-ON cost_splits FOR SELECT
-USING (auth.uid() = created_by);
+CREATE POLICY "Users can view splits they're part of or created"
+  ON cost_splits
+  FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = creator_id OR
+    id IN (SELECT split_id FROM split_members WHERE user_id = auth.uid() OR share_token IS NOT NULL)
+  );
 
-CREATE POLICY "Users can view splits they joined"
-ON cost_splits FOR SELECT
-USING (auth.uid() IN (SELECT user_id FROM split_members WHERE split_id = id));
+CREATE POLICY "Public can view splits via share token"
+  ON cost_splits
+  FOR SELECT
+  TO anon
+  USING (share_token IS NOT NULL);
 
-CREATE POLICY "Users can create splits"
-ON cost_splits FOR INSERT WITH CHECK (auth.uid() = created_by);
+CREATE POLICY "Users can insert splits"
+  ON cost_splits
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = creator_id);
 
-CREATE POLICY "Creator can update their splits"
-ON cost_splits FOR UPDATE USING (auth.uid() = created_by)
-WITH CHECK (auth.uid() = created_by);
+CREATE POLICY "Only creator can update splits"
+  ON cost_splits
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = creator_id)
+  WITH CHECK (auth.uid() = creator_id);
 
--- Split Members policies
-DROP POLICY IF EXISTS "Users can view split members" ON split_members;
-DROP POLICY IF EXISTS "Users can join splits" ON split_members;
+-- SPLIT MEMBERS RLS
+ALTER TABLE split_members ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view split members"
-ON split_members FOR SELECT
-USING (auth.uid() IN (
-  SELECT user_id FROM split_members sm2 WHERE sm2.split_id = split_id
-) OR auth.uid() IN (
-  SELECT created_by FROM cost_splits WHERE id = split_id
-));
+CREATE POLICY "Members can view their own split membership"
+  ON split_members
+  FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id OR split_id IN (SELECT id FROM cost_splits WHERE creator_id = auth.uid()));
+
+CREATE POLICY "Users can view members of splits they're in"
+  ON split_members
+  FOR SELECT
+  TO authenticated
+  USING (
+    user_id = auth.uid() OR
+    split_id IN (SELECT id FROM cost_splits WHERE creator_id = auth.uid())
+  );
+
+CREATE POLICY "Public can view members via cost_splits"
+  ON split_members
+  FOR SELECT
+  TO anon
+  USING (
+    split_id IN (SELECT id FROM cost_splits WHERE share_token IS NOT NULL)
+  );
 
 CREATE POLICY "Users can join splits"
-ON split_members FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON split_members
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update their membership"
-ON split_members FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Users can update their payment status"
+  ON split_members
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
--- Settlements policies
-DROP POLICY IF EXISTS "Users can view their settlements" ON settlements;
-DROP POLICY IF EXISTS "Users can create settlements" ON settlements;
+-- SETTLEMENTS RLS
+ALTER TABLE settlements ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can view their settlements"
-ON settlements FOR SELECT
-USING (auth.uid() = payer_id OR auth.uid() = payee_id);
+  ON settlements
+  FOR SELECT
+  TO authenticated
+  USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
 
-CREATE POLICY "Users can create settlements"
-ON settlements FOR INSERT WITH CHECK (auth.uid() = payer_id);
+CREATE POLICY "Users can insert settlements"
+  ON settlements
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = from_user_id);
 
-CREATE POLICY "Payee can mark as completed"
-ON settlements FOR UPDATE USING (auth.uid() = payee_id);
+CREATE POLICY "Users can update their settlements"
+  ON settlements
+  FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = from_user_id)
+  WITH CHECK (auth.uid() = from_user_id);
 
--- ================================================================
+-- ============================================
 -- INDEXES FOR PERFORMANCE
--- ================================================================
+-- ============================================
 
-CREATE INDEX IF NOT EXISTS idx_id_verifications_user ON id_verifications(user_id);
-CREATE INDEX IF NOT EXISTS idx_id_verifications_status ON id_verifications(verification_status);
+CREATE INDEX IF NOT EXISTS id_verifications_user_id_idx ON id_verifications(user_id);
+CREATE INDEX IF NOT EXISTS id_verifications_verified_idx ON id_verifications(verified);
 
-CREATE INDEX IF NOT EXISTS idx_ride_links_user ON ride_links(user_id);
-CREATE INDEX IF NOT EXISTS idx_ride_links_platform ON ride_links(platform);
-CREATE INDEX IF NOT EXISTS idx_ride_links_created ON ride_links(created_at DESC);
+CREATE INDEX IF NOT EXISTS ride_links_user_id_idx ON ride_links(user_id);
+CREATE INDEX IF NOT EXISTS ride_links_platform_idx ON ride_links(platform);
 
-CREATE INDEX IF NOT EXISTS idx_cost_splits_creator ON cost_splits(created_by);
-CREATE INDEX IF NOT EXISTS idx_cost_splits_status ON cost_splits(status);
-CREATE INDEX IF NOT EXISTS idx_cost_splits_expires ON cost_splits(expires_at);
-CREATE INDEX IF NOT EXISTS idx_cost_splits_token ON cost_splits(share_token);
+CREATE INDEX IF NOT EXISTS cost_splits_creator_id_idx ON cost_splits(creator_id);
+CREATE INDEX IF NOT EXISTS cost_splits_ride_link_id_idx ON cost_splits(ride_link_id);
+CREATE INDEX IF NOT EXISTS cost_splits_share_token_idx ON cost_splits(share_token);
+CREATE INDEX IF NOT EXISTS cost_splits_status_idx ON cost_splits(status);
 
-CREATE INDEX IF NOT EXISTS idx_split_members_split ON split_members(split_id);
-CREATE INDEX IF NOT EXISTS idx_split_members_user ON split_members(user_id);
-CREATE INDEX IF NOT EXISTS idx_split_members_status ON split_members(payment_status);
+CREATE INDEX IF NOT EXISTS split_members_split_id_idx ON split_members(split_id);
+CREATE INDEX IF NOT EXISTS split_members_user_id_idx ON split_members(user_id);
+CREATE INDEX IF NOT EXISTS split_members_payment_status_idx ON split_members(payment_status);
 
-CREATE INDEX IF NOT EXISTS idx_settlements_payer ON settlements(payer_id);
-CREATE INDEX IF NOT EXISTS idx_settlements_payee ON settlements(payee_id);
-CREATE INDEX IF NOT EXISTS idx_settlements_status ON settlements(status);
-CREATE INDEX IF NOT EXISTS idx_settlements_split ON settlements(split_id);
+CREATE INDEX IF NOT EXISTS settlements_from_user_id_idx ON settlements(from_user_id);
+CREATE INDEX IF NOT EXISTS settlements_to_user_id_idx ON settlements(to_user_id);
+CREATE INDEX IF NOT EXISTS settlements_status_idx ON settlements(status);
 
--- ================================================================
+-- ============================================
+-- REAL-TIME REPLICATION SETUP
+-- ============================================
+
+-- Enable real-time for cost-splitting tables
+DROP PUBLICATION IF EXISTS supabase_realtime CASCADE;
+CREATE PUBLICATION supabase_realtime FOR TABLE cost_splits, split_members, settlements, ride_links, id_verifications;
+
+-- ============================================
 -- HELPER FUNCTIONS
--- ================================================================
+-- ============================================
 
 -- Function to get split details with members
-CREATE OR REPLACE FUNCTION get_split_details(p_split_id UUID)
-RETURNS TABLE(
+CREATE OR REPLACE FUNCTION get_split_details(split_id UUID)
+RETURNS TABLE (
   split_id UUID,
-  created_by UUID,
+  creator_id UUID,
   title TEXT,
   total_amount DECIMAL,
-  member_count INT,
-  amount_per_person DECIMAL,
-  status TEXT,
-  members jsonb
+  per_person_amount DECIMAL,
+  number_of_people INTEGER,
+  member_count BIGINT,
+  ride_info JSONB
 ) AS $$
 SELECT
   cs.id,
-  cs.created_by,
+  cs.creator_id,
   cs.title,
   cs.total_amount,
-  COUNT(DISTINCT sm.id)::INT,
-  cs.amount_per_person,
-  cs.status,
-  jsonb_agg(
-    jsonb_build_object(
-      'user_id', sm.user_id,
-      'name', p.name,
-      'amount_owed', sm.amount_owed,
-      'amount_paid', sm.amount_paid,
-      'status', sm.payment_status
-    )
-  ) FILTER (WHERE sm.id IS NOT NULL)
+  cs.per_person_amount,
+  cs.number_of_people,
+  COUNT(sm.id),
+  jsonb_build_object(
+    'platform', rl.platform,
+    'pickup_location', rl.pickup_location,
+    'dropoff_location', rl.dropoff_location,
+    'ride_type', rl.ride_type,
+    'estimated_duration', rl.estimated_duration_minutes,
+    'estimated_distance', rl.estimated_distance_km
+  )
 FROM cost_splits cs
 LEFT JOIN split_members sm ON cs.id = sm.split_id
-LEFT JOIN profiles p ON sm.user_id = p.id
-WHERE cs.id = p_split_id
-GROUP BY cs.id, cs.created_by, cs.title, cs.total_amount, cs.amount_per_person, cs.status;
+LEFT JOIN ride_links rl ON cs.ride_link_id = rl.id
+WHERE cs.id = split_id
+GROUP BY cs.id, cs.creator_id, cs.title, cs.total_amount, cs.per_person_amount, cs.number_of_people, rl.platform, rl.pickup_location, rl.dropoff_location, rl.ride_type, rl.estimated_duration_minutes, rl.estimated_distance_km;
 $$ LANGUAGE SQL;
 
--- Function to generate shareable token
-CREATE OR REPLACE FUNCTION generate_share_token()
-RETURNS TEXT AS $$
-BEGIN
-  RETURN substr(md5(random()::text), 1, 32);
-END;
-$$ LANGUAGE plpgsql;
-
--- Function to calculate settlement amount
-CREATE OR REPLACE FUNCTION calculate_settlement(p_split_id UUID, p_user_id UUID)
-RETURNS DECIMAL AS $$
-SELECT COALESCE(amount_owed - amount_paid, 0)
-FROM split_members
-WHERE split_id = p_split_id AND user_id = p_user_id;
+-- Function to calculate settlement amounts
+CREATE OR REPLACE FUNCTION calculate_settlement(split_id UUID)
+RETURNS TABLE (
+  from_user_id UUID,
+  to_user_id UUID,
+  amount DECIMAL
+) AS $$
+SELECT 
+  sm.user_id,
+  cs.creator_id,
+  COALESCE(sm.amount_owed, 0)
+FROM split_members sm
+JOIN cost_splits cs ON sm.split_id = cs.id
+WHERE sm.split_id = split_id 
+AND sm.user_id IS NOT NULL
+AND sm.user_id != cs.creator_id
+AND sm.payment_status = 'pending';
 $$ LANGUAGE SQL;
-
--- Trigger to auto-generate share token
-CREATE OR REPLACE FUNCTION auto_generate_share_token()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF NEW.share_token IS NULL THEN
-    NEW.share_token := substr(md5(random()::text || NEW.id::text), 1, 32);
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trigger_auto_share_token ON cost_splits;
-
-CREATE TRIGGER trigger_auto_share_token
-BEFORE INSERT ON cost_splits
-FOR EACH ROW
-EXECUTE FUNCTION auto_generate_share_token();
-
--- ================================================================
--- ENABLE REALTIME
--- ================================================================
-
-ALTER PUBLICATION supabase_realtime ADD TABLE cost_splits;
-ALTER PUBLICATION supabase_realtime ADD TABLE split_members;
-ALTER PUBLICATION supabase_realtime ADD TABLE settlements;
-
-SELECT '✅ Ride cost splitting database setup complete!' as status;

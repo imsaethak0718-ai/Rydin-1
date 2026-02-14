@@ -1,13 +1,11 @@
-import { Home, Search, PlusCircle, MessageCircle, User, MapPin, Train, Bot } from "lucide-react";
+import { Home, PlusCircle, User, Share2, CreditCard } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { icon: Home, label: "Home", path: "/" },
-  { icon: PlusCircle, label: "Hopper", path: "/hopper" },
-  { icon: MapPin, label: "Events", path: "/events" },
-  { icon: Train, label: "Travel", path: "/travel" },
-  { icon: Bot, label: "AI", path: "/ai" },
+  { icon: Share2, label: "Split", path: "/create-split" },
+  { icon: CreditCard, label: "Pay", path: "/settlement" },
   { icon: User, label: "Profile", path: "/profile" },
 ];
 
