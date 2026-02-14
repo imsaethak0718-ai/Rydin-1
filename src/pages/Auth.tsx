@@ -51,7 +51,8 @@ const Auth = () => {
         setConfirmPassword("");
       } else {
         await login(email, password);
-        navigate("/profile-setup");
+        // Don't navigate here - let the useEffect above handle it
+        // based on profile_complete status
       }
     } catch (err: any) {
       toast({

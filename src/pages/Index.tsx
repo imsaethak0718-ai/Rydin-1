@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import RideCard from "@/components/RideCard";
 import BottomNav from "@/components/BottomNav";
 import PlatformDisclaimer from "@/components/PlatformDisclaimer";
+import { RideListSkeleton } from "@/components/RideCardSkeleton";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -245,7 +246,11 @@ const Index = () => {
           </p>
         </div>
 
-        {filteredRides.map((ride, i) => (
+        {loading ? (
+          <RideListSkeleton />
+        ) : (
+          <>
+            {filteredRides.map((ride, i) => (
           <RideCard
             key={ride.id}
             ride={{
@@ -271,6 +276,8 @@ const Index = () => {
             isJoined={userRides.has(ride.id)}
           />
         ))}
+          </>
+        )}
 
         {!loading && filteredRides.length === 0 && (
           <motion.div

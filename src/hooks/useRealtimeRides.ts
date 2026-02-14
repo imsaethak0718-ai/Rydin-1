@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface RideWithHost {
@@ -30,8 +31,16 @@ export const useRealtimeRides = (filters?: {
   const channel = useState<RealtimeChannel | null>(null)[0];
   const retryCountRef = useRef(0);
   const maxRetries = 3;
+  const { session } = useAuth(); // Get auth session context
 
   useEffect(() => {
+    // CRITICAL: Wait for session to be established before fetching
+    if (!session) {
+      console.log("⏳ Waiting for auth session to be established...");
+      setLoading(true);
+      return;
+    }
+
     const fetchRides = async (retryCount = 0) => {
       try {
         setLoading(true);
@@ -228,7 +237,7 @@ export const useRealtimeRides = (filters?: {
     return () => {
       subscription.unsubscribe();
     };
-  }, [filters?.status, filters?.destination, filters?.source]);
+  }, [session, filters?.status, filters?.destination, filters?.source]);
 
   return { rides, loading, error };
 };

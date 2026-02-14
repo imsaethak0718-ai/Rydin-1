@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Clock, Users, Star, Shield, Plane, ChevronRight, AlertCircle } from "lucide-react";
+import { MapPin, Clock, Users, Star, Shield, Plane, ChevronRight, AlertCircle, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -8,10 +8,11 @@ import RideDetailsModal from "./RideDetailsModal";
 import RideMatchReason from "./RideMatchReason";
 import { calculateRideStatus, getStatusConfig } from "@/lib/rideStatus";
 import { getMatchReason } from "@/lib/rideBuckets";
+import { isRideLocked } from "@/lib/rideLock";
 import type { Ride } from "@/data/mockRides";
 
 interface RideCardProps {
-  ride: Ride & { status?: string; bucket_name?: string };
+  ride: Ride & { status?: string; bucket_name?: string; locked_at?: string };
   index: number;
   onJoin?: (id: string) => void;
   onDetails?: (id: string) => void;
@@ -32,6 +33,9 @@ const RideCard = ({ ride, index, onJoin, onDetails, isHost, isJoined }: RideCard
   );
   const statusConfig = getStatusConfig(rideStatus);
 
+  // Check if ride is locked
+  const rideLocked = isRideLocked(ride.status as string, ride.locked_at);
+
   // Calculate seat fill percentage
   const seatFillPercent = (ride.seatsTaken / ride.seatsTotal) * 100;
   const isAlmostFull = seatsLeft === 1;
@@ -39,6 +43,7 @@ const RideCard = ({ ride, index, onJoin, onDetails, isHost, isJoined }: RideCard
   const getButtonState = () => {
     if (isHost) return { label: "Manage", variant: "outline" as const };
     if (isJoined) return { label: "View", variant: "default" as const };
+    if (rideLocked) return { label: "Locked", variant: "outline" as const };
     if (!statusConfig.canJoin) return { label: statusConfig.label, variant: "outline" as const };
     return { label: "Join", variant: "default" as const };
   };
@@ -124,6 +129,11 @@ const RideCard = ({ ride, index, onJoin, onDetails, isHost, isJoined }: RideCard
             <Badge variant="outline" className={`text-xs ${statusConfig.color}`}>
               {statusConfig.label}
             </Badge>
+            {rideLocked && (
+              <Badge variant="outline" className="text-xs border-orange-500 text-orange-600 gap-1">
+                <Lock className="w-3 h-3" /> Locked
+              </Badge>
+            )}
             {ride.girlsOnly && (
               <Badge variant="outline" className="text-xs border-safety text-safety gap-1">
                 <Shield className="w-3 h-3" /> Girls only
@@ -138,13 +148,14 @@ const RideCard = ({ ride, index, onJoin, onDetails, isHost, isJoined }: RideCard
             <Button
               onClick={(e) => {
                 e.stopPropagation();
-                if (buttonState.label === "Join" && onJoin) {
+                if (buttonState.label === "Join" && onJoin && !rideLocked) {
                   onJoin(ride.id);
                 }
               }}
-              disabled={!statusConfig.canJoin && buttonState.label === "Join"}
+              disabled={rideLocked || (!statusConfig.canJoin && buttonState.label === "Join")}
               variant={buttonState.variant}
               className="flex-1 sm:flex-none h-10 sm:h-8 text-sm sm:text-xs font-semibold"
+              title={rideLocked ? "This ride is locked - no more joins allowed" : ""}
             >
               {buttonState.label}
             </Button>

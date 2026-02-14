@@ -10,6 +10,10 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import ProfileSetup from "./pages/ProfileSetup";
 import CreateRide from "./pages/CreateRide";
+import CreateSplit from "./pages/CreateSplit";
+import ViewSplit from "./pages/ViewSplit";
+import Settlement from "./pages/Settlement";
+import Admin from "./pages/Admin";
 import Events from "./pages/Events";
 import Hopper from "./pages/Hopper";
 import Travel from "./pages/Travel";
@@ -97,6 +101,10 @@ const AppRoutes = () => (
     <Route path="/travel" element={<ProtectedRoute><Travel /></ProtectedRoute>} />
     <Route path="/ai" element={<ProtectedRoute><AIAssistant /></ProtectedRoute>} />
     <Route path="/create" element={<ProtectedRoute><CreateRide /></ProtectedRoute>} />
+    <Route path="/create-split" element={<ProtectedRoute><CreateSplit /></ProtectedRoute>} />
+    <Route path="/split/:shareToken" element={<ViewSplit />} />
+    <Route path="/settlement" element={<ProtectedRoute><Settlement /></ProtectedRoute>} />
+    <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
     <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
     <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
