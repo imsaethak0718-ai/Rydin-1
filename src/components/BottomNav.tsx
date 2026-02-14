@@ -1,10 +1,12 @@
-import { Home, PlusCircle, User, Share2, CreditCard } from "lucide-react";
+import { Home, Plus, MapPin, Zap, User, Share2, CreditCard } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { icon: Home, label: "Home", path: "/" },
+  { icon: Plus, label: "Ride", path: "/create" },
   { icon: Share2, label: "Split", path: "/create-split" },
+  { icon: MapPin, label: "Events", path: "/events" },
   { icon: CreditCard, label: "Pay", path: "/settlement" },
   { icon: User, label: "Profile", path: "/profile" },
 ];
