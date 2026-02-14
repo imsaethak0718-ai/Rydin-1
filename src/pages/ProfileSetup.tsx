@@ -94,12 +94,51 @@ const ProfileSetup = () => {
     setShowCamera(false);
   };
 
+  const compressImage = async (base64Data: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Data;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxWidth = 600;
+        const maxHeight = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+        }
+
+        // Compress to 70% quality (reduces size significantly)
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+    });
+  };
+
   const uploadIDPhoto = async (base64Data: string) => {
     if (!user?.id) return null;
 
     try {
+      // Compress image first
+      const compressedData = await compressImage(base64Data);
+
       // Convert base64 to blob
-      const response = await fetch(base64Data);
+      const response = await fetch(compressedData);
       const blob = await response.blob();
 
       const fileName = `${user.id}-${Date.now()}.jpg`;
