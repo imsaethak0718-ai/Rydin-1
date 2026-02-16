@@ -30,25 +30,25 @@ CREATE TABLE IF NOT EXISTS event_interested_users (
   UNIQUE(event_id, user_id)
 );
 
-CREATE TABLE IF NOT EXISTS event_ride_groups (
+CREATE TABLE IF NOT EXISTS event_ride_rooms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  organizer_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
+  organizer_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  ride_type TEXT DEFAULT 'to_event',
   departure_time TIMESTAMP WITH TIME ZONE NOT NULL,
   departure_location TEXT NOT NULL,
-  max_seats INTEGER DEFAULT 4,
+  max_capacity INTEGER DEFAULT 4,
   description TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS event_ride_members (
+CREATE TABLE IF NOT EXISTS event_ride_room_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  ride_group_id UUID NOT NULL REFERENCES event_ride_groups(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  ride_room_id UUID NOT NULL REFERENCES event_ride_rooms(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'cancelled')),
   joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(ride_group_id, user_id)
+  UNIQUE(ride_room_id, user_id)
 );
 
 -- ============================================

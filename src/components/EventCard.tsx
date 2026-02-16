@@ -12,6 +12,7 @@ interface EventCardProps {
     date: string;
     start_time: string;
     category: string;
+    image_url?: string;
     interested_count?: number;
     is_interested?: boolean;
   };
@@ -53,9 +54,13 @@ const EventCard = ({ event, onSelect, onInterest }: EventCardProps) => {
       onClick={onSelect}
     >
       <div className="flex gap-4">
-        {/* Event Image Placeholder */}
-        <div className="w-20 h-20 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center flex-shrink-0">
-          <span className="text-2xl">🎪</span>
+        {/* Event Image */}
+        <div className="w-20 h-20 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center flex-shrink-0 overflow-hidden">
+          {event.image_url ? (
+            <img src={event.image_url} alt={event.name} className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-2xl">🎪</span>
+          )}
         </div>
 
         {/* Event Details */}
@@ -75,11 +80,10 @@ const EventCard = ({ event, onSelect, onInterest }: EventCardProps) => {
               className="flex-shrink-0"
             >
               <Heart
-                className={`w-5 h-5 ${
-                  event.is_interested
+                className={`w-5 h-5 ${event.is_interested
                     ? "fill-red-500 text-red-500"
                     : "text-muted-foreground"
-                }`}
+                  }`}
               />
             </button>
           </div>

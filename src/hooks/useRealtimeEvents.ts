@@ -13,6 +13,7 @@ export interface Event {
   category: string;
   description?: string;
   created_by: string;
+  image_url?: string;
   created_at: string;
   interested_count?: number;
   is_interested?: boolean;
@@ -35,8 +36,8 @@ export const useRealtimeEvents = (filter: string = "all") => {
         const query = supabase
           .from("events")
           .select("*")
-          .gte("date", new Date().toISOString().split("T")[0])
-          .order("date", { ascending: true });
+          .gte("event_date", new Date().toISOString().split("T")[0])
+          .order("event_date", { ascending: true });
 
         if (filter !== "all") {
           query.eq("category", filter);
@@ -63,6 +64,10 @@ export const useRealtimeEvents = (filter: string = "all") => {
 
             return {
               ...event,
+              name: event.title,
+              date: event.event_date,
+              start_time: event.event_time,
+              image_url: event.image_url,
               interested_count: count || 0,
               is_interested: !!userInterest,
             };
@@ -83,15 +88,31 @@ export const useRealtimeEvents = (filter: string = "all") => {
             },
             (payload) => {
               if (payload.eventType === "INSERT") {
-                const newEvent = {
+                const newEvent: Event = {
                   ...payload.new,
+                  id: payload.new.id,
+                  name: payload.new.title,
+                  location: payload.new.location,
+                  date: payload.new.event_date,
+                  start_time: payload.new.event_time,
+                  category: payload.new.category,
+                  created_by: payload.new.organizer_id,
+                  created_at: payload.new.created_at,
+                  image_url: payload.new.image_url,
                   interested_count: 0,
                   is_interested: false,
-                };
+                } as Event;
                 setEvents((prev) => [...prev, newEvent]);
               } else if (payload.eventType === "UPDATE") {
                 setEvents((prev) =>
-                  prev.map((e) => (e.id === payload.new.id ? payload.new : e))
+                  prev.map((e) => (e.id === payload.new.id ? {
+                    ...e,
+                    ...payload.new,
+                    name: payload.new.title,
+                    date: payload.new.event_date,
+                    start_time: payload.new.event_time,
+                    image_url: payload.new.image_url,
+                  } as Event : e))
                 );
               } else if (payload.eventType === "DELETE") {
                 setEvents((prev) => prev.filter((e) => e.id !== payload.old.id));

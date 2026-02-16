@@ -22,6 +22,7 @@ interface EventModalProps {
     end_time?: string;
     category: string;
     description?: string;
+    image_url?: string;
     interested_count?: number;
     is_interested?: boolean;
   };
@@ -118,8 +119,12 @@ const EventModal = ({
 
         <div className="space-y-6">
           {/* Event Image */}
-          <div className="w-full h-64 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-            <span className="text-6xl">🎪</span>
+          <div className="w-full h-64 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center overflow-hidden">
+            {event.image_url ? (
+              <img src={event.image_url} alt={event.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-6xl">🎪</span>
+            )}
           </div>
 
           {/* Event Details */}
@@ -130,11 +135,10 @@ const EventModal = ({
               </Badge>
               <button onClick={onInterest}>
                 <Heart
-                  className={`w-6 h-6 ${
-                    event.is_interested
+                  className={`w-6 h-6 ${event.is_interested
                       ? "fill-red-500 text-red-500"
                       : "text-muted-foreground"
-                  }`}
+                    }`}
                 />
               </button>
             </div>

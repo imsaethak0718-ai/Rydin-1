@@ -12,10 +12,11 @@ Rydin is a **real-time student ride-matching platform** that helps students find
 - Safety-first design (no spam, verified students only)
 
 ### 2. **Events Nearby**
-- Browse upcoming events on campus
-- Mark events as interested
-- Auto-created ride rooms for events (to/from)
-- View other students attending
+- Browse real upcoming events in Chennai (Concerts, Fests, Stand-up)
+- Premium visual cards with high-res event banners
+- Intent-based ride matching: Join auto-created carpool rooms
+- Real-time interest tracking and participant counts
+- Integrated distance markers for campus-to-event travel
 
 ### 3. **Train/Flight Matching**
 - Add train/flight numbers silently
@@ -35,12 +36,23 @@ Rydin is a **real-time student ride-matching platform** that helps students find
 - Hopper vs alternatives comparison
 - Chat interface with instant answers
 
-### 6. **Additional Features**
-- Cost-saving estimator (live slider showing savings)
-- Emergency safety mode (1-click emergency contacts)
-- Trust score with badges (gamification)
-- Smart fallback (show alternatives when no match)
-- Girls-only ride option
+### 6. **Profile & Community Ecosystem**
+- **Profile Edit**: Dynamic profile management (UPI ID, Year, Dept, Phone)
+- **Identity OCR & Verification**: Secure onboarding with college ID scanning and identity confirmation.
+- **Trust Score**: Gamified reliability tracking with unlockable badges (e.g., "Safe Traveler", "Punctual").
+- **Dynamic Participant Bubbles**: Real-time visual avatars in event rooms showing exactly who has joined.
+- **Direct Messaging**: 1-on-1 personal chats that unlock only after a mutual match, preventing unsolicited spam.
+- **Unified Ride Dashboard**: A consolidated "Activity" view for all hosted, joined, and requested rides with real-time status updates and unread message indicators.
+- **Safe Mode**: Girls-only filters and 1-click emergency campus SOS buttons.
+
+### 7. **Smart Utilities & Interaction**
+- **Interactive Cost Estimator**: Real-time slider to visualize savings (Solo ₹1200 → Group ₹300).
+- **Intelligent Intent Discovery**: A matching algorithm that accounts for ±3-5 hours of schedule flexibility to maximize student connections.
+- **Smart Ride Links**: Paste links from Uber, Ola, or Rapido to automatically find matches and split costs.
+- **Live Shuttle HUD**: Simulated real-time tracking of campus shuttles with arrival predictions and frequency markers.
+- **Real-Time Travel Sync**: Auto-detect students on the same trains/flights with 0 sensitive data (No PNR sharing).
+- **Automated Settlement Notices**: Integrated chat reminders to settle costs once a ride is completed.
+- **College-Verified Badges**: Automatic reliability markers for verified `@srmist.edu.in` accounts.
 
 ---
 
@@ -74,47 +86,34 @@ src/
 ├── pages/
 │   ├── Auth.tsx                 # Google OAuth login
 │   ├── SMSVerification.tsx       # Phone OTP verification
-│   ├── ProfileSetup.tsx          # User profile setup
-│   ├── Index.tsx                 # Home/dashboard
-│   ├── Hopper.tsx               # Ride matching (CORE)
-│   ├── Events.tsx               # Event browsing
-│   ├── Travel.tsx               # Train/flight/shuttle info
-│   ├── AIAssistant.tsx          # AI travel advisor
-│   ├── Chat.tsx                 # Real-time messaging
-│   ├── Profile.tsx              # User profile
-│   ├── Search.tsx               # Search rides
-│   └── CreateRide.tsx           # Create ride (legacy)
+│   ├── ProfileSetup.tsx          # Initial user onboarding
+│   ├── ProfileEdit.tsx           # Premium profile management
+│   ├── Index.tsx                 # Real-time dashboard feed
+│   ├── Hopper.tsx               # Intent-based ride matching
+│   ├── Events.tsx               # Live Chennai event hub
+│   ├── Travel.tsx               # Transit integration (Shuttles/Trains)
+│   ├── Activity.tsx             # Managed rides, chat inbox, and status
+│   ├── Profile.tsx              # Trust score and user portfolio
+│   └── AIAssistant.tsx          # Smart travel coordination logic
 │
 ├── components/
-│   ├── BottomNav.tsx            # Navigation
-│   ├── HopperCard.tsx           # Hopper display
-│   ├── HopperRequestDialog.tsx   # Request/accept
-│   ├── HopperSafetyOptions.tsx   # Safety toggles
-│   ├── EventCard.tsx            # Event display
-│   ├── EventModal.tsx           # Event details
-│   ├── EventAutoRideRooms.tsx    # Auto-created rides
-│   ├── CostSavingEstimator.tsx   # Cost visualization
-│   ├── EmergencySafetyMode.tsx   # Emergency features
-│   ├── SmartFallbackSystem.tsx    # Fallback options
-│   ├── TrustScoreAnimation.tsx   # Trust score display
-│   └── ui/                      # shadcn UI components
-│
-├── contexts/
-│   └── AuthContext.tsx          # Google OAuth + SMS + Profile
-│
-├── hooks/
-│   ├── useHopperMatching.ts     # Matching algorithm
-│   ├── use-toast.ts             # Toast notifications
-│   └── use-mobile.tsx           # Mobile detection
+│   ├── BottomNav.tsx            # Optimized mobile navigation
+│   ├── EventCard.tsx            # Premium event showcasing
+│   ├── EventModal.tsx           # Carpool coordination for events
+│   ├── CostSavingEstimator.tsx   # Financial visualization
+│   └── EmergencySafetyMode.tsx   # Critical safety features
 │
 ├── integrations/
 │   ├── firebase/
-│   │   └── config.ts            # Firebase setup
+│   │   └── config.ts            # Auth & OTP setup
 │   └── supabase/
-│       ├── client.ts            # Supabase client
-│       └── schema.sql           # Database schema
+│       ├── client.ts            # Data & Real-time setup
+│       └── schema.sql           # Core database definitions
 │
-├── App.tsx                      # Main app routes
+├── backend/
+│   └── migrations/              # Robust, idempotent DB stabilization scripts
+│
+├── App.tsx                      # App routing & context providers
 └── main.tsx                     # Entry point
 ```
 
@@ -172,9 +171,14 @@ npm run dev
 CREATE INDEX idx_hoppers_date_location ON hoppers(date, pickup_location, drop_location);
 CREATE INDEX idx_hoppers_time ON hoppers(departure_time);
 CREATE INDEX idx_hoppers_active ON hoppers(status) WHERE status = 'active';
-CREATE INDEX idx_events_date_category ON events(date, category);
+CREATE INDEX idx_events_date_category ON events(event_date, category);
 CREATE INDEX idx_hopper_requests_pending ON hopper_requests(status) WHERE status = 'pending';
 ```
+
+### 3. Stability & Harmonization
+Rydin uses robust migration scripts to ensure database consistency. Run these in the SQL Editor:
+- `backend/migrations/STABILIZE_DATABASE_FINAL.sql`: Fixes RLS recursion and schema mismatches.
+- `backend/migrations/FIX_RPC_AND_SEED_EVENTS.sql`: Fixes RPC 404s and seeds Chennai events.
 
 ### 3. Enable Real-Time Subscriptions
 In Supabase:
@@ -280,11 +284,20 @@ ALTER TABLE event_interested_users REPLICA IDENTITY FULL;
    → Show animation: 72 → 75
    → Badge unlocks
 
-6. Fallback System (30 secs)
-   → Search with no matches
-   → Show alternatives: Shuttle, Train, Bus
+6. **Identity OCR (30 secs)**
+   → Show the ID Scan step in Profile Setup
+   → Explain: "Safety first with verified student IDs"
 
-7. Core Hopper (1 min)
+7. **Smart Links (1 min)**
+   → Paste an Uber ride link
+   → Show auto-extracted details: "Uber to Airport - ₹1450"
+   → Invite others to split!
+
+8. **Live Shuttle Map (30 secs)**
+   → Switch to Travel → Shuttle HUD
+   → Show the animated map and next arrival timing
+
+9. **Core Hopper (1 min)**
    → Create hopper (Campus → Airport, Tomorrow 3:30 PM)
    → Show matching hoppers
    → Send request

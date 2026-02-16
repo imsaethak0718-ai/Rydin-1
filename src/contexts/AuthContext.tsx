@@ -17,6 +17,8 @@ export interface Profile {
   trust_score: number;
   profile_complete: boolean;
   phone_verified: boolean;
+  upi_id?: string;
+  avatar_url?: string;
 }
 
 interface AuthContextType {
@@ -116,6 +118,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         trust_score: data.trust_score ?? 4.0,
         profile_complete: !!data.profile_complete,
         phone_verified: !!data.phone_verified,
+        upi_id: data.upi_id,
+        avatar_url: data.avatar_url,
       };
       setUser(profile);
       console.log("✅ Profile loaded. profile_complete =", profile.profile_complete);

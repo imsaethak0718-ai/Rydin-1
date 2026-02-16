@@ -25,6 +25,7 @@ import Transport from "./pages/Transport";
 import Activity from "./pages/Activity";
 import RideChat from "./pages/RideChat";
 import DirectChat from "./pages/DirectChat";
+import ProfileEdit from "./pages/ProfileEdit";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -112,6 +113,7 @@ const AppRoutes = () => (
     <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
     <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+    <Route path="/profile-edit" element={<ProtectedRoute><ProfileEdit /></ProtectedRoute>} />
     <Route path="/transport" element={<ProtectedRoute><Transport /></ProtectedRoute>} />
     <Route path="/activity" element={<ProtectedRoute><Activity /></ProtectedRoute>} />
     <Route path="/ride-chat" element={<ProtectedRoute><RideChat /></ProtectedRoute>} />
