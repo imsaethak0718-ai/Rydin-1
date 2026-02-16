@@ -41,20 +41,19 @@ export const parseUberLink = (link: string): ParsedRideLink => {
     const pickupPlaceId = params.get('pickup');
     const dropoffPlaceId = params.get('dropoff');
 
-    // Uber links don't directly contain price in the URL
-    // Price is fetched dynamically, so we'll estimate or show as pending
+    const isTripLink = link.includes('trip.uber.com');
+    const hasCoords = !!(pickupLat && pickupLng && dropoffLat && dropoffLng);
+
     return {
       platform: 'uber',
       originalLink: link,
-      pickupLocation: pickupPlaceId || `(${pickupLat}, ${pickupLng})`,
-      dropoffLocation: dropoffPlaceId || `(${dropoffLat}, ${dropoffLng})`,
+      pickupLocation: pickupPlaceId || (pickupLat ? `(${pickupLat}, ${pickupLng})` : undefined),
+      dropoffLocation: dropoffPlaceId || (dropoffLat ? `(${dropoffLat}, ${dropoffLng})` : undefined),
       rideType: 'Uber',
-      price: undefined, // Must be fetched from Uber API
+      price: undefined,
       currency: 'INR',
-      estimatedDuration: undefined,
-      estimatedDistance: undefined,
       extractedAt: new Date().toISOString(),
-      isValid: !!(pickupLat && pickupLng && dropoffLat && dropoffLng),
+      isValid: hasCoords,
       rawData: {
         pickupLat,
         pickupLng,
@@ -62,10 +61,13 @@ export const parseUberLink = (link: string): ParsedRideLink => {
         dropoffLng,
         pickupPlaceId,
         dropoffPlaceId,
+        isTripLink
       },
-      error: !!(pickupLat && pickupLng && dropoffLat && dropoffLng)
+      error: hasCoords
         ? undefined
-        : 'Could not extract full location from Uber link',
+        : isTripLink
+          ? 'Uber "trip" links don\'t share location details directly. Please use the "Request" link or enter details manually.'
+          : 'Could not extract full location from Uber link',
     };
   } catch (err) {
     return {
@@ -159,24 +161,28 @@ export const parseRapidoLink = (link: string): ParsedRideLink => {
     const url = new URL(link);
     const params = url.searchParams;
 
-    // Rapido sharing format
+    // Rapido sharing format (Booking details link)
     const bookingId = params.get('id');
     const amount = params.get('amount');
 
-    // Ride details
+    // Ride details (Booking details link)
     const pickup = params.get('pickup');
     const dropoff = params.get('dropoff');
     const price = params.get('price');
 
+    const isTrackingLink = link.includes('trk.rapido.bike');
+
     let pickupLocation = 'Pickup Location';
     let dropoffLocation = 'Drop Location';
+    let hasCoords = false;
 
-    if (pickup) {
+    if (pickup && pickup.includes(',')) {
       const [lat, lng] = pickup.split(',');
       pickupLocation = `(${lat}, ${lng})`;
+      hasCoords = true;
     }
 
-    if (dropoff) {
+    if (dropoff && dropoff.includes(',')) {
       const [lat, lng] = dropoff.split(',');
       dropoffLocation = `(${lat}, ${lng})`;
     }
@@ -186,23 +192,24 @@ export const parseRapidoLink = (link: string): ParsedRideLink => {
     return {
       platform: 'rapido',
       originalLink: link,
-      pickupLocation,
-      dropoffLocation,
+      pickupLocation: hasCoords ? pickupLocation : undefined,
+      dropoffLocation: hasCoords ? dropoffLocation : undefined,
       rideType: 'Rapido Bike',
       price: finalPrice,
       currency: 'INR',
-      estimatedDuration: undefined,
-      estimatedDistance: undefined,
       extractedAt: new Date().toISOString(),
-      isValid: !!(finalPrice && pickup && dropoff),
+      isValid: hasCoords && !!finalPrice,
       rawData: {
         bookingId,
         pickup,
         dropoff,
+        isTrackingLink
       },
-      error: !!(pickup && dropoff)
+      error: hasCoords
         ? undefined
-        : 'Could not extract full location from Rapido link',
+        : isTrackingLink
+          ? 'Rapido "tracking" links don\'t share location details. Please use a booking link or enter details manually.'
+          : 'Could not extract full location from Rapido link',
     };
   } catch (err) {
     return {
