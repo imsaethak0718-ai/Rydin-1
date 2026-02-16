@@ -85,6 +85,7 @@ const Travel = () => {
       const { data, error } = await supabase
         .from("train_info")
         .select("*")
+        .eq("user_id", user.id) // Filter to only show the logged-in user's trips
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -200,12 +201,19 @@ const Travel = () => {
         .eq("id", tripId);
 
       if (error) throw error;
+
+      // Update local state
       setMyTrips(prev => prev.filter(t => t.id !== tripId));
-      toast({ title: "Trip removed" });
-    } catch (err: any) {
+
       toast({
-        title: "Error",
-        description: err.message || "Failed to remove trip",
+        title: "Trip removed",
+        description: "Your travel request has been deleted."
+      });
+    } catch (err: any) {
+      console.error("Delete error:", err);
+      toast({
+        title: "Delete Failed",
+        description: err.message || "Failed to remove trip. Please check your connection.",
         variant: "destructive",
       });
     }
@@ -243,6 +251,7 @@ const Travel = () => {
         .insert({
           train_number: trainNumber.toUpperCase(),
           date: date,
+          user_id: user.id, // Associate trip with user
         })
         .select()
         .single();
@@ -298,6 +307,7 @@ const Travel = () => {
         .insert({
           train_number: flightNumber.toUpperCase(),
           date: date,
+          user_id: user.id, // Associate trip with user
         })
         .select()
         .single();
