@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import BottomNav from "@/components/BottomNav";
+import ShuttleSimMap from "@/components/ShuttleSimMap";
 
 const localTrains = [
     { route: "Beach - Tambaram/Chengalpattu", freq: "Every 10-15 mins", type: "South Line", peak: "8 AM - 11 AM", status: "On Time" },

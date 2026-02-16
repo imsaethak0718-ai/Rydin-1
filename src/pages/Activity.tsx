@@ -14,7 +14,7 @@ interface RideRequest {
     id: string;
     ride_id: string;
     user_id: string;
-    status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
+    status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired';
     profiles: {
         name: string;
         department: string | null;
@@ -42,6 +42,12 @@ const Activity = () => {
 
     const fetchData = async () => {
         if (!user) return;
+
+        // Trigger expiry cleanup in background
+        (async () => {
+            try { await supabase.rpc('expire_past_rides'); } catch (e) { }
+        })();
+
         setIsLoading(true);
 
         try {
@@ -277,23 +283,29 @@ const Activity = () => {
                                                 </div>
                                             </div>
 
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
-                                                    onClick={() => handleRequest(req.ride_id, req.user_id, 'reject')}
-                                                >
-                                                    <X className="w-4 h-4 mr-2" /> Reject
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
-                                                    onClick={() => handleRequest(req.ride_id, req.user_id, 'accept')}
-                                                >
-                                                    <Check className="w-4 h-4 mr-2" /> Accept
-                                                </Button>
-                                            </div>
+                                            {req.status === 'expired' ? (
+                                                <div className="text-center p-2 bg-muted/20 rounded-xl border border-dashed border-border">
+                                                    <p className="text-[10px] text-muted-foreground font-medium uppercase">Request Expired</p>
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="rounded-xl border-red-200 text-red-600 hover:bg-red-50"
+                                                        onClick={() => handleRequest(req.ride_id, req.user_id, 'reject')}
+                                                    >
+                                                        <X className="w-4 h-4 mr-2" /> Reject
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        className="rounded-xl bg-green-600 hover:bg-green-700 text-white"
+                                                        onClick={() => handleRequest(req.ride_id, req.user_id, 'accept')}
+                                                    >
+                                                        <Check className="w-4 h-4 mr-2" /> Accept
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </motion.div>
                                     ))
                                 )}
@@ -321,7 +333,8 @@ const Activity = () => {
                                                     req.status === 'accepted' && "bg-green-500/10 text-green-600 border-none",
                                                     req.status === 'pending' && "bg-orange-500/10 text-orange-600 border-none",
                                                     req.status === 'rejected' && "bg-red-500/10 text-red-600 border-none",
-                                                    req.status === 'cancelled' && "bg-gray-500/10 text-gray-600 border-none"
+                                                    req.status === 'cancelled' && "bg-gray-500/10 text-gray-600 border-none",
+                                                    req.status === 'expired' && "bg-gray-400/10 text-gray-500 border-none"
                                                 )}
                                             >
                                                 {req.status}

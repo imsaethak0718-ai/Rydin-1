@@ -71,7 +71,10 @@ export const useRealtimeRides = (filters?: {
 
         // Wrap query execution in a timeout to prevent hanging requests
         // query = query.order("created_at", { ascending: false }); // SAFEGUARD: created_at might be missing
-        query = query.order("date", { ascending: true }); // Sort by departure date instead
+        // Filter out past rides
+        const today = new Date().toISOString().split('T')[0];
+        query = query.gte("date", today);
+        query = query.order("date", { ascending: true });
 
         // Execute query WITHOUT custom timeout to see real error
         const { data: ridesData, error: fetchError } = await query;

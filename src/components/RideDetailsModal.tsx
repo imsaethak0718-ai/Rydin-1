@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { X, Users, MapPin, Calendar, Clock, Shield, Share2, Phone, AlertCircle, Heart, ExternalLink, Check } from "lucide-react";
+import { X, Users, MapPin, Calendar, Clock, Shield, Share2, MessageSquare, AlertCircle, Heart, ExternalLink, Check } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -32,6 +33,7 @@ const RideDetailsModal = ({ rideId, open, onOpenChange, ride }: RideDetailsModal
   const [hostInfo, setHostInfo] = useState<any>(null);
   const { toast } = useToast();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   // Use real-time members hook
   const { members, loading: membersLoading } = useRealtimeRideMembers(rideId);
@@ -62,19 +64,19 @@ const RideDetailsModal = ({ rideId, open, onOpenChange, ride }: RideDetailsModal
   };
 
   const seatsLeft = ride.seats_total - ride.seats_taken;
-  const farePerPerson = Math.round(ride.estimated_fare / ride.seats_total);
+  const farePerPerson = Math.round(ride.estimated_fare / (ride.seats_total + 1));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-full max-w-md sm:max-w-md max-h-[90vh] bg-card border-border p-4 sm:p-6">
-        <DialogHeader className="mb-4">
+      <DialogContent className="w-full max-w-md sm:max-w-md max-h-[90vh] bg-card border-border p-0 flex flex-col overflow-hidden">
+        <DialogHeader className="p-4 sm:p-6 pb-2 border-b border-border/50">
           <DialogTitle className="text-xl sm:text-2xl">Ride Details</DialogTitle>
         </DialogHeader>
 
         {membersLoading ? (
           <div className="py-8 text-center text-muted-foreground">Loading...</div>
         ) : (
-          <div className="space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 pt-2 space-y-4 no-scrollbar">
             {/* Route Info */}
             <div className="bg-background/50 rounded-lg p-4 space-y-2">
               <div className="flex items-center gap-2 text-sm">
@@ -190,14 +192,15 @@ const RideDetailsModal = ({ rideId, open, onOpenChange, ride }: RideDetailsModal
                         {member.profiles?.trust_score?.toFixed(1)}
                       </p>
                     </div>
-                    {isMember && (
+                    {(isMember || isHost) && member.user_id !== user?.id && (
                       <Button
                         size="sm"
                         variant="ghost"
-                        className="h-8 w-8 p-0"
-                        title={`Call ${member.profiles?.name}`}
+                        className="h-8 w-8 p-0 text-primary"
+                        onClick={() => navigate(`/chat/${member.user_id}`)}
+                        title={`Message ${member.profiles?.name}`}
                       >
-                        <Phone className="w-4 h-4" />
+                        <MessageSquare className="w-4 h-4" />
                       </Button>
                     )}
                   </div>

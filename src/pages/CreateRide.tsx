@@ -143,6 +143,23 @@ const CreateRide = () => {
             <Switch checked={girlsOnly} onCheckedChange={setGirlsOnly} />
           </div>
 
+          {estimatedFare && seatsTotal && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-primary/5 border border-primary/20 rounded-xl p-4 flex flex-col items-center justify-center text-center gap-1"
+            >
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Estimated Per Head</p>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl font-bold text-primary">₹{Math.round(parseFloat(estimatedFare) / (parseInt(seatsTotal) + 1))}</span>
+                <span className="text-xs text-muted-foreground">/ person</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                (Split between you and {seatsTotal} co-travelers)
+              </p>
+            </motion.div>
+          )}
+
           <Button type="submit" className="w-full h-12 sm:h-11 text-base sm:text-sm font-semibold" disabled={isSubmitting}>
             {isSubmitting ? "Creating..." : "Create Ride"}
           </Button>

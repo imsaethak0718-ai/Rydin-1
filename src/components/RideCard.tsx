@@ -28,7 +28,8 @@ interface RideCardProps {
 const RideCard = ({ ride, index, onJoin, onDetails, isHost, isJoined }: RideCardProps) => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const seatsLeft = ride.seatsTotal - ride.seatsTaken;
-  const farePerPerson = Math.round(ride.estimatedFare / (ride.seatsTaken + 1));
+  // Calculate potential fare per person (total fare / (available seats + host))
+  const farePerPerson = Math.round(ride.estimatedFare / (ride.seatsTotal + 1));
 
   // Determine ride status
   const rideStatus = calculateRideStatus(
