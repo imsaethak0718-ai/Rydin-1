@@ -6,8 +6,8 @@ import { supabase } from "@/integrations/supabase/client";
  */
 export const joinRideAtomic = async (rideId: string, userId: string) => {
   const { data, error } = await supabase.rpc('join_ride', {
-    ride_id: rideId,
-    user_id: userId,
+    p_ride_id: rideId,
+    p_user_id: userId,
   });
 
   if (error) throw error;
