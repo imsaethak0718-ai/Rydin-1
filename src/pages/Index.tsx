@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Filter, MapPin, TrendingDown, ExternalLink, Search } from "lucide-react";
+import { Filter, MapPin, TrendingDown, ExternalLink, Search, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import BottomNav from "@/components/BottomNav";
 import PlatformDisclaimer from "@/components/PlatformDisclaimer";
 import { RideListSkeleton } from "@/components/RideCardSkeleton";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTheme } from "@/components/ThemeProvider";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeRides } from "@/hooks/useRealtimeRides";
@@ -32,6 +33,7 @@ const Index = () => {
   const [userRides, setUserRides] = useState<Set<string>>(new Set());
   const [totalSavings, setTotalSavings] = useState(0);
   const { session, user } = useAuth();
+  const { theme, setTheme } = useTheme();
   const { toast } = useToast();
 
   // Make debug function available in console
@@ -197,9 +199,20 @@ const Index = () => {
                 <MapPin className="w-3 h-3" /> SRM Campus
               </p>
             </div>
-            <Button variant="outline" size="icon" className="h-10 w-10 sm:h-9 sm:w-9">
-              <Filter className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 sm:h-9 sm:w-9"
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                aria-label="Toggle theme"
+              >
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
+              <Button variant="outline" size="icon" className="h-10 w-10 sm:h-9 sm:w-9">
+                <Filter className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
 
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">

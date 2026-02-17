@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Train, Bus, Clock, Search, ArrowLeft, Info, ExternalLink, Zap, ChevronDown, Star, Heart, Phone, CreditCard, MapPin } from "lucide-react";
+import { Train, Bus, Clock, Search, ArrowLeft, Info, ExternalLink, Zap, ChevronDown, Star, Heart, Phone, CreditCard, MapPin, Ticket, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -550,7 +550,7 @@ const Transport = () => {
                                         }`}
                                     onClick={() => setBusFilter(filter)}
                                 >
-                                    {filter === "Electric" && "⚡ "}
+                                    {filter === "Electric" && <Zap className="w-3 h-3 mr-1 inline" />}
                                     {filter}
                                 </Badge>
                             ))}
@@ -562,7 +562,7 @@ const Transport = () => {
                                 <Info className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                                 <div className="text-sm space-y-2">
                                     <p className="font-semibold text-emerald-700 flex items-center gap-2">
-                                        <span className="text-lg">🎫</span> Quick Info
+                                        <Ticket className="w-4 h-4" /> Quick Info
                                     </p>
                                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
                                         <div className="flex items-center gap-1">
@@ -573,8 +573,9 @@ const Transport = () => {
                                             <Phone className="w-3 h-3 text-emerald-600" />
                                             <span className="text-muted-foreground">Care: 149 (Toll-free)</span>
                                         </div>
-                                        <div className="col-span-2 text-muted-foreground">
-                                            📱 Real-time: Moovit / TownBus app
+                                        <div className="col-span-2 flex items-center gap-1 text-muted-foreground">
+                                            <Smartphone className="w-3 h-3 text-emerald-600" />
+                                            <span>Real-time: Moovit / TownBus app</span>
                                         </div>
                                     </div>
                                 </div>
@@ -616,8 +617,8 @@ const Transport = () => {
                                                         </div>
                                                     )}
                                                     {bus.electric && (
-                                                        <Badge variant="outline" className="text-[9px] h-4 px-1 bg-green-50 text-green-700 border-green-200">
-                                                            ⚡
+                                                        <Badge variant="outline" className="text-[9px] h-4 px-1 bg-green-50 text-green-700 border-green-200 flex items-center">
+                                                            <Zap className="w-2.5 h-2.5" />
                                                         </Badge>
                                                     )}
                                                 </div>
@@ -665,8 +666,9 @@ const Transport = () => {
                                                             </div>
                                                             <p className="text-xs text-muted-foreground mt-0.5">Via: {bus.via}</p>
                                                             {!isExpanded && (
-                                                                <p className="text-[10px] text-muted-foreground mt-1">
-                                                                    🕐 Every {bus.freq} • {bus.fare}
+                                                                <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                                                                    <Clock className="w-3 h-3" />
+                                                                    Every {bus.freq} • {bus.fare}
                                                                 </p>
                                                             )}
                                                         </div>
@@ -691,8 +693,8 @@ const Transport = () => {
                                                     <Badge variant="outline" className="text-[10px] h-5">{bus.type}</Badge>
                                                     <Badge variant="outline" className="text-[10px] h-5">Every {bus.freq}</Badge>
                                                     {bus.electric && (
-                                                        <Badge variant="outline" className="text-[10px] h-5 bg-green-50 text-green-700 border-green-200">
-                                                            ⚡ Electric
+                                                        <Badge variant="outline" className="text-[10px] h-5 bg-green-50 text-green-700 border-green-200 flex items-center gap-0.5">
+                                                            <Zap className="w-3 h-3" /> Electric
                                                         </Badge>
                                                     )}
                                                 </div>
