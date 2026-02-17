@@ -14,7 +14,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeRides } from "@/hooks/useRealtimeRides";
 import { requestJoinRide, calculateRideSavings } from "@/lib/database";
 import { debugSupabase } from "@/lib/debugSupabase";
-import { InstallPrompt } from "@/components/InstallPrompt";
 
 const filters = ["All", "Airport", "Station", "Girls Only"];
 
@@ -198,80 +197,9 @@ const Index = () => {
                 <MapPin className="w-3 h-3" /> SRM Campus
               </p>
             </div>
-
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button variant="outline" size="icon" className="h-10 w-10 sm:h-9 sm:w-9 relative">
-                  <Filter className="w-4 h-4" />
-                  {sortBy !== 'time' && <div className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full" />}
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-[300px] sm:w-[400px]">
-                <SheetHeader>
-                  <SheetTitle>Filters & Sort</SheetTitle>
-                  <SheetDescription>
-                    Customize your ride feed
-                  </SheetDescription>
-                </SheetHeader>
-
-                <div className="grid gap-6 py-6">
-                  {/* Sort Options */}
-                  <div className="space-y-3">
-                    <h4 className="font-medium text-sm text-foreground/80">Sort By</h4>
-                    <RadioGroup value={sortBy} onValueChange={setSortBy} className="gap-3">
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="time" id="sort-time" />
-                        <Label htmlFor="sort-time">Earliest Departure (Default)</Label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="price" id="sort-price" />
-                        <Label htmlFor="sort-price">Price: Low to High</Label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="seats" id="sort-seats" />
-                        <Label htmlFor="sort-seats">Most Available Seats</Label>
-                      </div>
-                    </RadioGroup>
-                  </div>
-
-                  <Separator />
-
-                  {/* Filter Options */}
-                  <div className="space-y-4">
-                    <h4 className="font-medium text-sm text-foreground/80">Preferences</h4>
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="girls-only" className="flex flex-col gap-1">
-                        <span>Girls Only Rides</span>
-                        <span className="font-normal text-xs text-muted-foreground">Only show female-exclusive pools</span>
-                      </Label>
-                      <Switch
-                        id="girls-only"
-                        checked={activeFilter === "Girls Only"}
-                        onCheckedChange={(checked) => setActiveFilter(checked ? "Girls Only" : "All")}
-                        disabled={user?.gender !== 'female'}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <SheetFooter>
-                  <SheetClose asChild>
-                    <Button type="submit" className="w-full">Show {orderedRides.length} Rides</Button>
-                  </SheetClose>
-                </SheetFooter>
-              </SheetContent>
-            </Sheet>
-          </div>
-
-          {/* Search Bar */}
-          <div className="relative mb-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search destination, source, or flight/train number..."
-              className="pl-9 h-10 bg-secondary/50 border-transparent focus:bg-background transition-colors"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+            <Button variant="outline" size="icon" className="h-10 w-10 sm:h-9 sm:w-9">
+              <Filter className="w-4 h-4" />
+            </Button>
           </div>
 
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -292,9 +220,6 @@ const Index = () => {
       </header>
 
       <main className="max-w-lg mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Install PWA Prompt */}
-        <InstallPrompt />
-
         {/* WhatsApp Community Banner */}
         <div className="flex items-center justify-between bg-background border border-border rounded-xl p-4 mb-6 shadow-sm hover:shadow-md transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] cursor-pointer group animate-in fade-in slide-in-from-top-4">
           <div className="flex items-center gap-4">
