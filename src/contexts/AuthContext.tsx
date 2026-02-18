@@ -30,6 +30,8 @@ interface AuthContextType {
   signUp: (email: string, password: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  verifyOtp: (email: string, token: string) => Promise<void>;
+  resendOtp: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<Profile>) => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -294,6 +296,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw new Error(error.message);
   };
 
+  const verifyOtp = async (email: string, token: string) => {
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: "signup",
+    });
+    if (error) throw new Error(error.message);
+  };
+
+  const resendOtp = async (email: string) => {
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+    });
+    if (error) throw new Error(error.message);
+  };
+
   const logout = async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -404,6 +423,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signUp,
         login,
         signInWithGoogle,
+        verifyOtp,
+        resendOtp,
         logout,
         updateProfile,
         refreshProfile,
