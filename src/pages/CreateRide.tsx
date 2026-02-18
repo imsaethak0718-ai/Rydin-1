@@ -11,7 +11,7 @@ import BottomNav from "@/components/BottomNav";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import MapPicker from "@/components/MapPicker";
+import MapPicker from "@/components/MapPicker.tsx";
 import PlaceAutocomplete, { SelectedPlace } from "@/components/PlaceAutocomplete";
 import { checkSuspiciousActivity, flagUser } from "@/lib/moderation";
 import { useTravelZones, findZoneForPoint, TravelZone } from "@/hooks/useTravelZones";
