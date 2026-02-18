@@ -1,16 +1,11 @@
 /**
- * ID Card Scanner V3 — Two-Pass Targeted OCR for SRM ID Cards
- * 
- * Strategy: 
- *   Pass 1: Quick OCR on full card to FIND the "Name" line and its bounding box
- *   Pass 2: Crop just the name text, upscale 3x, re-OCR with SINGLE_LINE mode
- * 
- * This is MUCH more accurate because:
- *   - Watermarks/noise are minimal in the small cropped region
- *   - Text is upscaled to very high resolution
- *   - Tesseract knows it's reading a single line, not a full page
- * 
- * Also faster: only 2 rotations (0°, 90°) × 2 passes = max 4 OCR calls
+ * ID Card Scanner V5.0 — Robust OCR for low-quality laminated SRM ID photos
+ *
+ * V5.0 improvements:
+ *   1. Orientation sweep now includes 180° and runs a two-stage best-rotation search.
+ *   2. Added card-focus crops + binarization variant for noisy backgrounds/glare.
+ *   3. Reworked Name extraction with token-based parser around "Name:" labels.
+ *   4. Stronger fuzzy matching for missing middle names, split surnames, and OCR noise.
  */
 
 import { createWorker, OEM, PSM } from 'tesseract.js';
@@ -29,607 +24,884 @@ export interface IDScanResult {
 // CANVAS UTILITIES
 // ─────────────────────────────────────────────
 
-const loadImage = (base64: string): Promise<HTMLImageElement> =>
+const loadImage = (src: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
     img.onerror = reject;
-    img.src = base64;
+    img.src = src;
   });
 
-/** Rotate image by degrees */
-const rotateCanvas = (img: HTMLImageElement, degrees: number): HTMLCanvasElement => {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d')!;
-  if (degrees === 90 || degrees === 270) {
-    canvas.width = img.height;
-    canvas.height = img.width;
-  } else {
-    canvas.width = img.width;
-    canvas.height = img.height;
-  }
-  ctx.translate(canvas.width / 2, canvas.height / 2);
-  ctx.rotate((degrees * Math.PI) / 180);
-  ctx.drawImage(img, -img.width / 2, -img.height / 2);
-  return canvas;
+const canvasFromImage = (img: HTMLImageElement): HTMLCanvasElement => {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  c.getContext('2d')!.drawImage(img, 0, 0);
+  return c;
 };
 
-/** Scale canvas so the smaller dimension is at least targetMin pixels */
-const scaleUp = (source: HTMLCanvasElement, targetMin: number): HTMLCanvasElement => {
-  const minDim = Math.min(source.width, source.height);
-  if (minDim >= targetMin) return source;
-  const scale = targetMin / minDim;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(source.width * scale);
-  canvas.height = Math.round(source.height * scale);
-  const ctx = canvas.getContext('2d')!;
+const rotateCanvas = (img: HTMLImageElement, deg: number): HTMLCanvasElement => {
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d')!;
+  if (deg === 90 || deg === 270) { c.width = img.height; c.height = img.width; }
+  else { c.width = img.width; c.height = img.height; }
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.drawImage(img, -img.width / 2, -img.height / 2);
+  return c;
+};
+
+const scaleUp = (src: HTMLCanvasElement, targetMin: number): HTMLCanvasElement => {
+  const minDim = Math.min(src.width, src.height);
+  if (minDim >= targetMin) return src;
+  const s = targetMin / minDim;
+  const c = document.createElement('canvas');
+  c.width = Math.round(src.width * s); c.height = Math.round(src.height * s);
+  const ctx = c.getContext('2d')!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-  return canvas;
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  return c;
 };
 
-/** Crop a region from a canvas */
 const cropCanvas = (
   source: HTMLCanvasElement,
-  x: number, y: number, w: number, h: number
+  xRatio: number,
+  yRatio: number,
+  wRatio: number,
+  hRatio: number
 ): HTMLCanvasElement => {
-  // Clamp to canvas bounds
-  const sx = Math.max(0, Math.round(x));
-  const sy = Math.max(0, Math.round(y));
-  const sw = Math.min(Math.round(w), source.width - sx);
-  const sh = Math.min(Math.round(h), source.height - sy);
+  const sx = Math.max(0, Math.floor(source.width * xRatio));
+  const sy = Math.max(0, Math.floor(source.height * yRatio));
+  const sw = Math.max(1, Math.floor(source.width * wRatio));
+  const sh = Math.max(1, Math.floor(source.height * hRatio));
+  const boundedW = Math.min(sw, source.width - sx);
+  const boundedH = Math.min(sh, source.height - sy);
 
-  const canvas = document.createElement('canvas');
-  canvas.width = sw;
-  canvas.height = sh;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
-  return canvas;
+  const c = document.createElement('canvas');
+  c.width = boundedW;
+  c.height = boundedH;
+  c.getContext('2d')!.drawImage(source, sx, sy, boundedW, boundedH, 0, 0, boundedW, boundedH);
+  return c;
 };
 
-/** Upscale a canvas by a fixed factor */
-const upscaleCanvas = (source: HTMLCanvasElement, factor: number): HTMLCanvasElement => {
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(source.width * factor);
-  canvas.height = Math.round(source.height * factor);
-  const ctx = canvas.getContext('2d')!;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-  return canvas;
+const buildCardFocusCrops = (source: HTMLCanvasElement): HTMLCanvasElement[] => {
+  // Many user uploads contain hand/background around the card.
+  // Keep a few deterministic crops to isolate ID text area.
+  const crops = [
+    source,
+    cropCanvas(source, 0.06, 0.04, 0.88, 0.92), // card-centered crop
+    cropCanvas(source, 0.14, 0.30, 0.72, 0.38), // name + reg no area
+  ];
+
+  // Deduplicate exact-size duplicates (happens on already tight crops)
+  const unique: HTMLCanvasElement[] = [];
+  const seen = new Set<string>();
+  for (const c of crops) {
+    const key = `${c.width}x${c.height}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(c);
+    }
+  }
+  return unique;
+};
+
+/**
+ * Sharpen image using unsharp mask technique.
+ * Helps Tesseract read blurry/faded text on laminated cards.
+ */
+const sharpen = (source: HTMLCanvasElement): HTMLCanvasElement => {
+  const c = document.createElement('canvas');
+  c.width = source.width; c.height = source.height;
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(source, 0, 0);
+  const imgData = ctx.getImageData(0, 0, c.width, c.height);
+  const d = imgData.data;
+  const w = c.width, h = c.height;
+
+  // Copy original for reference
+  const orig = new Uint8ClampedArray(d);
+
+  // Apply 3x3 sharpening kernel: center=5, neighbors=-1
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = (y * w + x) * 4;
+      for (let ch = 0; ch < 3; ch++) {
+        const val =
+          5 * orig[i + ch] -
+          orig[((y - 1) * w + x) * 4 + ch] -
+          orig[((y + 1) * w + x) * 4 + ch] -
+          orig[(y * w + x - 1) * 4 + ch] -
+          orig[(y * w + x + 1) * 4 + ch];
+        d[i + ch] = Math.max(0, Math.min(255, val));
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  return c;
 };
 
 // ─────────────────────────────────────────────
 // IMAGE PREPROCESSING
 // ─────────────────────────────────────────────
 
-/** Convert to grayscale */
-const grayscale = (source: HTMLCanvasElement): HTMLCanvasElement => {
-  const canvas = document.createElement('canvas');
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const ctx = canvas.getContext('2d')!;
+/**
+ * Color-based text isolation — FALLBACK only
+ * Keeps dark, non-colored pixels (black printed text)
+ * Removes colored watermarks and light backgrounds
+ */
+const isolateText = (source: HTMLCanvasElement, brightMax: number, colorMax: number): HTMLCanvasElement => {
+  const c = document.createElement('canvas');
+  c.width = source.width; c.height = source.height;
+  const ctx = c.getContext('2d')!;
   ctx.drawImage(source, 0, 0);
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const imgData = ctx.getImageData(0, 0, c.width, c.height);
   const d = imgData.data;
+
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const brightness = (r + g + b) / 3;
+    const colorRange = Math.max(r, g, b) - Math.min(r, g, b);
+
+    if (brightness < brightMax && colorRange < colorMax) {
+      d[i] = 0; d[i + 1] = 0; d[i + 2] = 0;
+    } else if (brightness < (brightMax + 30) && colorRange < (colorMax - 20)) {
+      d[i] = 50; d[i + 1] = 50; d[i + 2] = 50;
+    } else {
+      d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  return c;
+};
+
+/**
+ * Simple sharpen + contrast boost — gentle enhancement without destroying text
+ */
+const enhanceContrast = (source: HTMLCanvasElement): HTMLCanvasElement => {
+  const c = document.createElement('canvas');
+  c.width = source.width; c.height = source.height;
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(source, 0, 0);
+  const imgData = ctx.getImageData(0, 0, c.width, c.height);
+  const d = imgData.data;
+
+  // Convert to grayscale + histogram stretch
+  const hist = new Array(256).fill(0);
   for (let i = 0; i < d.length; i += 4) {
     const g = Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
     d[i] = g; d[i + 1] = g; d[i + 2] = g;
+    hist[g]++;
   }
-  ctx.putImageData(imgData, 0, 0);
-  return canvas;
-};
-
-/**
- * Adaptive threshold — handles watermarks and uneven lighting
- * For each pixel, compares against the LOCAL mean in a block around it
- */
-const adaptiveThreshold = (source: HTMLCanvasElement, blockSize: number = 25, C: number = 10): HTMLCanvasElement => {
-  const canvas = document.createElement('canvas');
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(source, 0, 0);
-
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = imgData.data;
-  const w = canvas.width, h = canvas.height;
-
-  // Build integral image
-  const integral = new Float64Array(w * h);
-  for (let y = 0; y < h; y++) {
-    let rowSum = 0;
-    for (let x = 0; x < w; x++) {
-      rowSum += d[(y * w + x) * 4];
-      integral[y * w + x] = rowSum + (y > 0 ? integral[(y - 1) * w + x] : 0);
-    }
+  const total = c.width * c.height;
+  let low = 0, high = 255, cum = 0;
+  for (let i = 0; i < 256; i++) {
+    cum += hist[i];
+    if (cum < total * 0.03) low = i;
+    if (cum < total * 0.97) high = i;
   }
-
-  const half = Math.floor(blockSize / 2);
-  const result = new Uint8ClampedArray(d.length);
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const x1 = Math.max(0, x - half), y1 = Math.max(0, y - half);
-      const x2 = Math.min(w - 1, x + half), y2 = Math.min(h - 1, y + half);
-      const area = (x2 - x1 + 1) * (y2 - y1 + 1);
-      let sum = integral[y2 * w + x2];
-      if (x1 > 0) sum -= integral[y2 * w + (x1 - 1)];
-      if (y1 > 0) sum -= integral[(y1 - 1) * w + x2];
-      if (x1 > 0 && y1 > 0) sum += integral[(y1 - 1) * w + (x1 - 1)];
-      const mean = sum / area;
-      const idx = (y * w + x) * 4;
-      const val = d[idx] > (mean - C) ? 255 : 0;
-      result[idx] = val; result[idx + 1] = val; result[idx + 2] = val; result[idx + 3] = 255;
-    }
-  }
-
-  ctx.putImageData(new ImageData(result, w, h), 0, 0);
-  return canvas;
-};
-
-/** Simple contrast enhancement */
-const enhanceContrast = (source: HTMLCanvasElement, strength: number = 1.8): HTMLCanvasElement => {
-  const canvas = document.createElement('canvas');
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(source, 0, 0);
-  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = imgData.data;
-
+  const range = Math.max(high - low, 1);
   for (let i = 0; i < d.length; i += 4) {
-    let val = ((d[i] / 255 - 0.5) * strength + 0.5) * 255;
-    val = Math.max(0, Math.min(255, Math.round(val)));
+    let val = Math.round(((d[i] - low) / range) * 255);
+    val = Math.max(0, Math.min(255, val));
     d[i] = val; d[i + 1] = val; d[i + 2] = val;
   }
+  ctx.putImageData(imgData, 0, 0);
+  return c;
+};
+
+/**
+ * Otsu binarization: robust fallback for faded text on laminated backgrounds.
+ */
+const binarizeOtsu = (source: HTMLCanvasElement): HTMLCanvasElement => {
+  const c = document.createElement('canvas');
+  c.width = source.width;
+  c.height = source.height;
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(source, 0, 0);
+  const imgData = ctx.getImageData(0, 0, c.width, c.height);
+  const d = imgData.data;
+
+  const hist = new Array(256).fill(0);
+  const gray = new Uint8Array(c.width * c.height);
+
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const g = Math.round(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114);
+    gray[p] = g;
+    hist[g]++;
+  }
+
+  const total = gray.length;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+
+  let sumB = 0;
+  let wB = 0;
+  let maxVariance = 0;
+  let threshold = 128;
+
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const variance = wB * wF * (mB - mF) * (mB - mF);
+    if (variance > maxVariance) {
+      maxVariance = variance;
+      threshold = t;
+    }
+  }
+
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    const val = gray[p] > threshold ? 255 : 0;
+    d[i] = val;
+    d[i + 1] = val;
+    d[i + 2] = val;
+  }
 
   ctx.putImageData(imgData, 0, 0);
-  return canvas;
-};
-
-/** Light preprocessing for Pass 1 (finding labels) — fast */
-const preprocessForLabelDetection = (canvas: HTMLCanvasElement): HTMLCanvasElement => {
-  const scaled = scaleUp(canvas, 1200);
-  const gray = grayscale(scaled);
-  return enhanceContrast(gray, 1.5);
-};
-
-/** Heavy preprocessing for Pass 2 (reading name text) — accurate */
-const preprocessForNameReading = (canvas: HTMLCanvasElement): HTMLCanvasElement[] => {
-  // Return multiple variants — we'll OCR each and pick best
-  const gray = grayscale(canvas);
-  const variants: HTMLCanvasElement[] = [];
-
-  // Variant 1: Adaptive threshold (handles watermarks best)
-  variants.push(adaptiveThreshold(gray, 21, 8));
-
-  // Variant 2: High contrast (handles faded text)
-  variants.push(enhanceContrast(gray, 2.5));
-
-  // Variant 3: Adaptive with larger block (handles large watermarks)
-  variants.push(adaptiveThreshold(gray, 41, 15));
-
-  return variants;
+  return c;
 };
 
 // ─────────────────────────────────────────────
-// TWO-PASS OCR ENGINE
+// SRM CARD TEXT ANALYSIS
 // ─────────────────────────────────────────────
 
-/** Score how well OCR text matches SRM card structure */
-const scoreSRMText = (text: string): number => {
-  let score = 0;
-  const t = text.toLowerCase();
-  if (/name\s*[:;.]/i.test(text)) score += 50;
-  if (t.includes('programme')) score += 20;
-  if (t.includes('register')) score += 15;
-  if (/b\.?\s*tech/i.test(text)) score += 15;
-  if (/ra\d{5,}/i.test(text)) score += 20;
-  if (t.includes('srm')) score += 10;
-  if (t.includes('faculty')) score += 8;
-  if (t.includes('engineering')) score += 8;
-  if (t.includes('kattankulathur')) score += 8;
-  if (t.includes('valid')) score += 5;
-  return score;
+const scoreSRM = (text: string): number => {
+  let s = 0;
+  if (/name\s*[:;.]/i.test(text)) s += 50;
+  if (/\bname\b/i.test(text)) s += 20;
+  if (/programme/i.test(text)) s += 20;
+  if (/register/i.test(text)) s += 15;
+  if (/b\.?\s*tech/i.test(text)) s += 15;
+  if (/ra\d{5,}/i.test(text)) s += 20;
+  if (/srm/i.test(text)) s += 10;
+  if (/faculty/i.test(text)) s += 8;
+  if (/engineering/i.test(text)) s += 8;
+  if (/kattankulathur/i.test(text)) s += 8;
+  if (/valid/i.test(text)) s += 5;
+  return s;
 };
 
-interface TesseractLine {
-  text: string;
-  confidence: number;
-  bbox: { x0: number; y0: number; x1: number; y1: number };
-  words: Array<{
-    text: string;
-    confidence: number;
-    bbox: { x0: number; y0: number; x1: number; y1: number };
-  }>;
-}
-
-/**
- * Pass 1: Find the "Name" line on the card and return its bounding box
- */
-const findNameLine = (lines: TesseractLine[]): {
-  nameLineIdx: number;
-  colonX: number;
-  lineBbox: { x0: number; y0: number; x1: number; y1: number };
-} | null => {
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    // Check if this line contains "Name" (with OCR tolerance)
-    if (/[Nn][ae]m[ec]?\s*[:;.]/i.test(line.text) || /^[Nn]ame/i.test(line.text)) {
-      // Find the ":" position in this line
-      let colonX = line.bbox.x0;
-      for (const word of line.words) {
-        if (word.text.includes(':') || word.text.includes(';')) {
-          colonX = word.bbox.x1;
-          break;
-        }
-      }
-      // If no colon found, estimate it as ~30% into the line (after "Name" label)
-      if (colonX === line.bbox.x0) {
-        colonX = line.bbox.x0 + (line.bbox.x1 - line.bbox.x0) * 0.25;
-      }
-
-      return { nameLineIdx: i, colonX, lineBbox: line.bbox };
-    }
-  }
-  return null;
-};
-
-/**
- * Determine the crop region for the name text
- * Includes the current line (after ":") and possibly next line for multi-line names
- */
-const getNameCropRegion = (
-  lines: TesseractLine[],
-  nameLineIdx: number,
-  colonX: number,
-  lineBbox: { x0: number; y0: number; x1: number; y1: number },
-  canvasWidth: number
-): { x: number; y: number; w: number; h: number } => {
-  const lineHeight = lineBbox.y1 - lineBbox.y0;
-  const padding = Math.max(lineHeight * 0.3, 8);
-
-  let cropY = lineBbox.y0 - padding;
-  let cropH = lineHeight + padding * 2;
-
-  // Check if next line is continuation of name (not "Programme" etc.)
-  if (nameLineIdx + 1 < lines.length) {
-    const nextLine = lines[nameLineIdx + 1];
-    const isLabel = /programme|program|register|valid|b\.?tech|faculty/i.test(nextLine.text);
-    if (!isLabel && nextLine.text.trim().length > 1) {
-      // Extend crop to include next line (multi-line name like "KANTE REVANTH SAI\nVEERABHADRA")
-      cropH = (nextLine.bbox.y1 - cropY) + padding;
-    }
-  }
-
-  return {
-    x: colonX + 2,
-    y: Math.max(0, cropY),
-    w: canvasWidth - colonX - 2,
-    h: cropH,
-  };
-};
-
-/**
- * Clean name text from OCR output
- */
-const cleanNameText = (text: string): string => {
-  return text
-    // Remove SRM watermark artifacts
-    .replace(/[OoC]?S\s*R\s*[MNW]/gi, '')
-    .replace(/\bSRM\b/gi, '')
-    .replace(/\bOSRM\b/gi, '')
-    // Remove field labels that might bleed in
-    .replace(/programme/gi, '')
-    .replace(/register/gi, '')
-    .replace(/b\.?\s*tech/gi, '')
-    .replace(/\(?\s*cse\s*\)?/gi, '')
-    // Remove numbers
-    .replace(/[0-9]/g, '')
-    // Remove stray punctuation
-    .replace(/[:;.,()]/g, ' ')
-    // Remove single characters (noise)
-    .replace(/\b[a-zA-Z]\b/g, '')
-    // Collapse whitespace
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
-/**
- * Extract reg number from full OCR text
- */
 const extractRegNo = (text: string): string | null => {
   const m = text.match(/(RA\d{8,})/i) || text.match(/([A-Z]{2}\d{10,})/);
   return m ? m[1] : null;
 };
 
-/**
- * Main two-pass OCR pipeline
- */
-const twoPassOCR = async (
-  img: HTMLImageElement
-): Promise<{ name: string | null; regNo: string | null; fullText: string; confidence: number }> => {
-  // Create worker once, reuse for all passes
-  const worker = await createWorker('eng', OEM.LSTM_ONLY);
-  await worker.setParameters({
-    tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
-    preserve_interword_spaces: '1',
-  });
+// Words on SRM cards that are NOT student names
+const NON_NAME = new Set([
+  'SRM', 'OSRM', 'CSRM', 'OSFIM', 'GSRM', 'DSRM',
+  'FACULTY', 'ENGINEERING', 'TECHNOLOGY', 'INSTITUTE', 'SCIENCE',
+  'PROGRAMME', 'REGISTER', 'VALID', 'FROM', 'CAMPUS', 'STUDENT',
+  'KATTANKULATHUR', 'CHENGALPATTU', 'CHENGALP', 'TAMIL', 'NADU',
+  'EMAIL', 'WEBSITE', 'PHONE', 'DEEMED', 'UNIVERSITY', 'UGC', 'ACT',
+  'TECH', 'BTECH', 'NAME', 'THE', 'AND', 'FOR', 'WITH',
+  'CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'ENGG', 'SOFTWARE', 'IT', 'AIML',
+  'JUN', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+]);
 
-  const rotations = [0, 90]; // Only realistic orientations
-  let bestPass1 = { text: '', lines: [] as TesseractLine[], score: -1, rotation: 0, canvas: null as HTMLCanvasElement | null };
-
-  // ── PASS 1: Find the best rotation and locate "Name" ──
-  for (const deg of rotations) {
-    console.log(`🔄 Pass 1 — trying rotation ${deg}°`);
-    const base = deg === 0
-      ? (() => { const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; c.getContext('2d')!.drawImage(img, 0, 0); return c; })()
-      : rotateCanvas(img, deg);
-
-    const preprocessed = preprocessForLabelDetection(base);
-    const base64 = preprocessed.toDataURL('image/png');
-
-    const { data } = await worker.recognize(base64);
-    const score = scoreSRMText(data.text);
-    console.log(`  Score: ${score} | Found "Name": ${/name\s*[:;.]/i.test(data.text)}`);
-
-    if (score > bestPass1.score) {
-      bestPass1 = {
-        text: data.text,
-        lines: data.lines as TesseractLine[],
-        score,
-        rotation: deg,
-        canvas: preprocessed,
-      };
-    }
-
-    // Good enough — stop trying rotations
-    if (score >= 60) break;
-  }
-
-  console.log(`\n✅ Best rotation: ${bestPass1.rotation}° (score: ${bestPass1.score})`);
-  console.log('📄 Full text:', bestPass1.text);
-
-  const regNo = extractRegNo(bestPass1.text);
-  const isSRM = bestPass1.score >= 15;
-
-  // Find the "Name" line
-  const nameLocation = findNameLine(bestPass1.lines);
-
-  if (!nameLocation || !bestPass1.canvas) {
-    // Fallback: try regex extraction from full text
-    console.log('⚠️ Could not locate "Name" line, falling back to regex');
-    const fallbackName = extractNameFromFullText(bestPass1.text);
-    await worker.terminate();
-    return { name: fallbackName, regNo, fullText: bestPass1.text, confidence: bestPass1.score / 100 };
-  }
-
-  console.log(`📍 "Name" found at line ${nameLocation.nameLineIdx}, colon at x=${nameLocation.colonX}`);
-
-  // ── PASS 2: Crop and re-OCR the name region ──
-  const cropRegion = getNameCropRegion(
-    bestPass1.lines,
-    nameLocation.nameLineIdx,
-    nameLocation.colonX,
-    nameLocation.lineBbox,
-    bestPass1.canvas.width
-  );
-
-  console.log(`✂️ Cropping name region: x=${cropRegion.x}, y=${cropRegion.y}, w=${cropRegion.w}, h=${cropRegion.h}`);
-
-  // Get the original (non-preprocessed) rotated canvas for cropping
-  const originalRotated = bestPass1.rotation === 0
-    ? (() => { const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; c.getContext('2d')!.drawImage(img, 0, 0); return c; })()
-    : rotateCanvas(img, bestPass1.rotation);
-
-  // Scale factor between preprocessed and original (we need to map bbox coordinates)
-  const scaleX = originalRotated.width / bestPass1.canvas.width;
-  const scaleY = originalRotated.height / bestPass1.canvas.height;
-
-  // Crop from original image (unpreprocessed for best quality)
-  const nameCrop = cropCanvas(
-    originalRotated,
-    cropRegion.x * scaleX,
-    cropRegion.y * scaleY,
-    cropRegion.w * scaleX,
-    cropRegion.h * scaleY
-  );
-
-  // Upscale the tiny crop 3x for much better OCR
-  const upscaled = upscaleCanvas(nameCrop, 3);
-
-  // Try multiple preprocessing variants on the cropped name
-  const nameVariants = preprocessForNameReading(upscaled);
-
-  // Switch to SINGLE_LINE mode for the name
-  await worker.setParameters({
-    tessedit_pageseg_mode: PSM.SINGLE_BLOCK, // SINGLE_BLOCK handles 1-2 line names
-  });
-
-  let bestName = '';
-  let bestNameConfidence = 0;
-
-  for (let v = 0; v < nameVariants.length; v++) {
-    const varBase64 = nameVariants[v].toDataURL('image/png');
-    const { data: nameData } = await worker.recognize(varBase64);
-    const rawName = nameData.text.trim();
-    const cleaned = cleanNameText(rawName);
-    const avgConfidence = nameData.words.length > 0
-      ? nameData.words.reduce((sum: number, w: any) => sum + w.confidence, 0) / nameData.words.length
-      : 0;
-
-    console.log(`  📝 Name variant ${v}: "${rawName}" → cleaned: "${cleaned}" (confidence: ${avgConfidence.toFixed(0)})`);
-
-    if (cleaned.length > bestName.length || (cleaned.length === bestName.length && avgConfidence > bestNameConfidence)) {
-      bestName = cleaned;
-      bestNameConfidence = avgConfidence;
-    }
-  }
-
-  await worker.terminate();
-
-  // If pass 2 failed, fall back to pass 1 text extraction
-  if (!bestName || bestName.length < 2) {
-    console.log('⚠️ Pass 2 failed, falling back to Pass 1 text');
-    bestName = extractNameFromFullText(bestPass1.text) || '';
-  }
-
-  return {
-    name: bestName || null,
-    regNo,
-    fullText: bestPass1.text,
-    confidence: isSRM ? Math.min(bestNameConfidence / 100, 1.0) : 0.3,
-  };
+const isNameWord = (w: string): boolean => {
+  if (w.length === 0) return false;
+  if (NON_NAME.has(w.toUpperCase())) return false;
+  if (/^\d+$/.test(w)) return false;
+  if (/RA\d{4,}/i.test(w)) return false;
+  return true;
 };
 
 /**
- * Fallback: extract name from full OCR text using regex
+ * Extract ALL possible name candidates from OCR text
  */
-const extractNameFromFullText = (text: string): string | null => {
-  const patterns = [
-    /[Nn][ae]m[ec]?\s*[:;.]\s*(.+?)(?=\s*\n|\s*Programme|\s*Program|\s*Register|$)/i,
-    /[Nn]ame\s*[:;.]\s*(.+)/i,
-  ];
+const fixCommonOCRNoise = (s: string): string =>
+  s
+    .replace(/0/g, 'O')
+    .replace(/1(?=[A-Z])/g, 'I')
+    .replace(/\$/g, 'S')
+    .replace(/\|/g, 'I')
+    .replace(/\{/g, '(')
+    .replace(/5(?=[A-Z])/g, 'S')
+    .replace(/8(?=[A-Z])/g, 'B')
+    .replace(/[@#*~`]/g, ' ')
+    .replace(/\s+/g, ' ');
 
-  for (const p of patterns) {
-    const m = text.match(p);
-    if (m && m[1]) {
-      const cleaned = cleanNameText(m[1]);
-      if (cleaned.length >= 3) return cleaned.toUpperCase();
+const NAME_STOP_WORDS = new Set([
+  'PROGRAMME', 'PROGRAM', 'REGISTER', 'VALID', 'FROM', 'TO', 'COLLEGE',
+  'FACULTY', 'ENGINEERING', 'TECHNOLOGY', 'CAMPUS', 'KATTANKULATHUR',
+  'CHENGALPATTU', 'PHONE', 'EMAIL', 'WEBSITE', 'DEPARTMENT',
+]);
+
+const normalizeNameCandidate = (raw: string): string => {
+  const corrected = fixCommonOCRNoise(raw.toUpperCase());
+  const cleaned = corrected.replace(/[^A-Z.\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const words = cleaned
+    .split(' ')
+    .map(w => w.replace(/\.+$/g, ''))
+    .filter(w => w.length > 0 && isNameWord(w) && !NAME_STOP_WORDS.has(w));
+
+  // Most names are 1-4 words on these cards; trim noisy tails.
+  const finalWords = words.slice(0, 4);
+  return finalWords.join(' ').trim();
+};
+
+const extractCandidates = (text: string): string[] => {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const addCandidate = (raw: string) => {
+    const cleaned = normalizeNameCandidate(raw);
+    if (cleaned.length < 3) return;
+    const dedupeKey = cleaned.replace(/\s/g, '');
+    if (!seen.has(dedupeKey)) {
+      seen.add(dedupeKey);
+      candidates.push(cleaned);
+    }
+  };
+
+  const normalizedText = fixCommonOCRNoise(text.replace(/\r/g, '\n'));
+
+  // Strategy 1: Text between "Name" and next structural label.
+  const between = normalizedText.match(
+    /(?:^|\n)\s*(?:NAME|NANE|NAIME|NARNE)\s*[:;.]\s*([\s\S]*?)(?=\bPROGRAMME\b|\bPROGRAM\b|\bREGISTER\b|\bVALID\b|\n{2,}|$)/i
+  );
+  if (between?.[1]) addCandidate(between[1].replace(/\n/g, ' '));
+
+  // Strategy 2: line-level parse around Name label.
+  for (const line of normalizedText.split('\n')) {
+    if (!/(?:^|\s)(?:NAME|NANE|NAIME|NARNE)\s*[:;.]/i.test(line)) continue;
+    const rhs = line.replace(/^.*?(?:NAME|NANE|NAIME|NARNE)\s*[:;.]\s*/i, '');
+    addCandidate(rhs);
+  }
+
+  // Strategy 3: token scan after Name label to handle wrapped names.
+  const tokens = normalizedText
+    .replace(/[:;,.]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tk = tokens[i].toUpperCase().replace(/[^A-Z]/g, '');
+    if (!['NAME', 'NANE', 'NAIME', 'NARNE'].includes(tk)) continue;
+
+    const captured: string[] = [];
+    for (let j = i + 1; j < tokens.length && captured.length < 4; j++) {
+      const w = tokens[j].toUpperCase().replace(/[^A-Z]/g, '');
+      if (!w) continue;
+      if (NAME_STOP_WORDS.has(w) || /^(RA[A-Z0-9]{4,}|BTECH|TECH|CSE|ECE|EEE|IT|AIML)$/.test(w)) break;
+      if (isNameWord(w)) captured.push(w);
+    }
+    if (captured.length > 0) addCandidate(captured.join(' '));
+  }
+
+  // Strategy 4: uppercase dominant sequences on lines that look like name rows.
+  for (const line of normalizedText.split('\n')) {
+    if (/programme|register|valid|faculty|engineering|technology|campus|kattankulathur|email|website|044-/i.test(line)) continue;
+    if ((line.match(/\d/g) || []).length > 4) continue;
+    const likelyName = line.match(/[A-Z]{2,}(?:\s+[A-Z]{2,}){0,3}/g) || [];
+    for (const seq of likelyName) addCandidate(seq);
+  }
+
+  // Strategy 5: merge split surname fragments ("MANGALWED HEKAR" -> "MANGALWEDHEKAR").
+  const merged: string[] = [];
+  for (const c of [...candidates]) {
+    const parts = c.split(' ');
+    if (parts.length < 2) continue;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const m = [...parts];
+      if (parts[i].length >= 4 && parts[i + 1].length >= 3) {
+        m.splice(i, 2, parts[i] + parts[i + 1]);
+        merged.push(m.join(' '));
+      }
     }
   }
-  return null;
+  for (const m of merged) addCandidate(m);
+
+  return candidates;
 };
 
 // ─────────────────────────────────────────────
-// FUZZY NAME MATCHING
+// FUZZY NAME MATCHING (FIXED — no more false positives)
 // ─────────────────────────────────────────────
 
 const levenshtein = (a: string, b: string): number => {
-  const matrix: number[][] = [];
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
+  const m: number[][] = [];
+  for (let i = 0; i <= b.length; i++) m[i] = [i];
+  for (let j = 0; j <= a.length; j++) m[0][j] = j;
+  for (let i = 1; i <= b.length; i++)
     for (let j = 1; j <= a.length; j++) {
       const cost = b[i - 1] === a[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+      m[i][j] = Math.min(m[i - 1][j] + 1, m[i][j - 1] + 1, m[i - 1][j - 1] + cost);
     }
-  }
-  return matrix[b.length][a.length];
+  return m[b.length][a.length];
 };
 
-const normalize = (s: string): string =>
-  s.toLowerCase().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim();
+const norm = (s: string) =>
+  fixCommonOCRNoise(s.toUpperCase())
+    .replace(/[^A-Z\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 
-/**
- * Word-level fuzzy name matching
- * Handles: OCR typos, garbled surnames, initials, middle names
- */
+const jaroWinkler = (s1: string, s2: string): number => {
+  if (s1 === s2) return 1;
+  const len1 = s1.length;
+  const len2 = s2.length;
+  if (!len1 || !len2) return 0;
+
+  const matchDistance = Math.floor(Math.max(len1, len2) / 2) - 1;
+  const s1Matches = new Array(len1).fill(false);
+  const s2Matches = new Array(len2).fill(false);
+
+  let matches = 0;
+  for (let i = 0; i < len1; i++) {
+    const start = Math.max(0, i - matchDistance);
+    const end = Math.min(i + matchDistance + 1, len2);
+    for (let j = start; j < end; j++) {
+      if (s2Matches[j] || s1[i] !== s2[j]) continue;
+      s1Matches[i] = true;
+      s2Matches[j] = true;
+      matches++;
+      break;
+    }
+  }
+  if (!matches) return 0;
+
+  let t = 0;
+  for (let i = 0, k = 0; i < len1; i++) {
+    if (!s1Matches[i]) continue;
+    while (!s2Matches[k]) k++;
+    if (s1[i] !== s2[k]) t++;
+    k++;
+  }
+
+  const transpositions = t / 2;
+  const jaro =
+    (matches / len1 + matches / len2 + (matches - transpositions) / matches) / 3;
+
+  let prefix = 0;
+  const prefixLimit = Math.min(4, len1, len2);
+  while (prefix < prefixLimit && s1[prefix] === s2[prefix]) prefix++;
+  return jaro + prefix * 0.1 * (1 - jaro);
+};
+
 export const fuzzyNameMatch = (
   profileName: string,
   idName: string
 ): { match: boolean; similarity: number } => {
-  const a = normalize(profileName);
-  const b = normalize(idName);
-
+  const a = norm(profileName);
+  const b = norm(idName);
   if (!a || !b) return { match: false, similarity: 0 };
   if (a === b) return { match: true, similarity: 1.0 };
 
-  const aWords = a.split(' ').filter(w => w.length >= 2);
-  const bWords = b.split(' ').filter(w => w.length >= 2);
+  const aWords = a.split(' ').filter(w => w.length >= 2 && !NAME_STOP_WORDS.has(w.toUpperCase()));
+  const bWords = b.split(' ').filter(w => w.length >= 2 && !NAME_STOP_WORDS.has(w.toUpperCase()));
 
-  // Full string similarity
+  if (aWords.length === 0 || bWords.length === 0) return { match: false, similarity: 0 };
+
+  // Word-merge: OCR often splits long surnames into two tokens.
+  const bMerged: string[] = [...bWords];
+  const aMerged: string[] = [...aWords];
+  for (let j = 0; j < bWords.length - 1; j++) {
+    const merged = bWords[j] + bWords[j + 1];
+    if (merged.length >= 6) bMerged.push(merged);
+    if (j < bWords.length - 2) {
+      const merged3 = bWords[j] + bWords[j + 1] + bWords[j + 2];
+      if (merged3.length >= 8) bMerged.push(merged3);
+    }
+  }
+  for (let j = 0; j < aWords.length - 1; j++) {
+    const merged = aWords[j] + aWords[j + 1];
+    if (merged.length >= 6) aMerged.push(merged);
+  }
+
+  // Full-string and order-invariant similarities.
   const fullSim = 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+  const sortedA = [...aWords].sort().join(' ');
+  const sortedB = [...bWords].sort().join(' ');
+  const tokenOrderInvariantSim =
+    sortedA && sortedB
+      ? 1 - levenshtein(sortedA, sortedB) / Math.max(sortedA.length, sortedB.length)
+      : 0;
 
-  // Word-level matching
+  const wordSimilarity = (w1: string, w2: string): number => {
+    const wSim = 1 - levenshtein(w1, w2) / Math.max(w1.length, w2.length);
+    const jw = jaroWinkler(w1, w2);
+    return Math.max(wSim, jw);
+  };
+
   let wordMatches = 0;
+  let matchedSimSum = 0;
   const usedB = new Set<number>();
-  for (const aw of aWords) {
-    for (let j = 0; j < bWords.length; j++) {
+  for (const aw of aMerged) {
+    let bestSim = 0;
+    let bestJ = -1;
+    const threshold = aw.length >= 8 ? 0.46 : 0.58;
+
+    for (let j = 0; j < bMerged.length; j++) {
       if (usedB.has(j)) continue;
-      const bw = bWords[j];
-      const wSim = 1 - levenshtein(aw, bw) / Math.max(aw.length, bw.length);
-      // Also check prefix matching (OCR truncation: "PRITHISH" → "PRITHI")
-      const prefixSim = (aw.startsWith(bw) || bw.startsWith(aw))
-        ? Math.max(0.85, Math.min(aw.length, bw.length) / Math.max(aw.length, bw.length))
-        : 0;
-      if (Math.max(wSim, prefixSim) >= 0.6) {
-        wordMatches++;
-        usedB.add(j);
-        break;
-      }
+      const sim = wordSimilarity(aw, bMerged[j]);
+      if (sim > bestSim) { bestSim = sim; bestJ = j; }
+    }
+    if (bestSim >= threshold && bestJ >= 0) {
+      wordMatches++;
+      matchedSimSum += bestSim;
+      usedB.add(bestJ);
     }
   }
 
-  const totalWords = Math.max(aWords.length, bWords.length);
-  const wordSim = totalWords > 0 ? wordMatches / totalWords : 0;
+  const totalWords = Math.max(aMerged.length, 1);
+  const coverage = wordMatches / totalWords;
+  const avgWordSim = matchedSimSum / Math.max(wordMatches, 1);
+  const wordSim = coverage * avgWordSim;
 
-  // First-name matching (most important for verification)
-  let firstNameSim = 0;
-  if (aWords[0] && aWords[0].length >= 3) {
-    for (const bw of bWords) {
-      const sim = 1 - levenshtein(aWords[0], bw) / Math.max(aWords[0].length, bw.length);
-      const prefix = (aWords[0].startsWith(bw) || bw.startsWith(aWords[0]))
-        ? Math.max(0.85, Math.min(aWords[0].length, bw.length) / Math.max(aWords[0].length, bw.length))
-        : 0;
-      firstNameSim = Math.max(firstNameSim, sim, prefix);
+  // First and last word anchors are strong signals for real identity match.
+  let firstSim = 0;
+  let lastSim = 0;
+  if (aWords[0]?.length >= 2) {
+    for (const bw of bMerged) {
+      if (bw.length < 2) continue;
+      firstSim = Math.max(firstSim, wordSimilarity(aWords[0], bw));
+    }
+  }
+  if (aWords[aWords.length - 1]?.length >= 2) {
+    for (const bw of bMerged) {
+      if (bw.length < 2) continue;
+      lastSim = Math.max(lastSim, wordSimilarity(aWords[aWords.length - 1], bw));
     }
   }
 
-  // Contains check
-  const contains = aWords.some(w => w.length >= 3 && bWords.some(bw => bw.includes(w) || w.includes(bw)));
-
-  const similarity = Math.max(
-    fullSim,
-    wordSim * 0.95,
-    firstNameSim >= 0.7 ? Math.max(0.78, firstNameSim * 0.9) : 0,
-    contains ? 0.85 : 0
+  // Containment check with length-ratio guard to avoid short-word false positives.
+  const contains = aWords.some(aw =>
+    aw.length >= 4 && bMerged.some(bw => {
+      if (bw.length < 4) return false;
+      const shorter = Math.min(aw.length, bw.length);
+      const longer = Math.max(aw.length, bw.length);
+      if (shorter / longer < 0.6) return false;
+      return aw.includes(bw) || bw.includes(aw);
+    })
   );
 
-  const isMatch =
-    similarity >= 0.60 ||
-    (firstNameSim >= 0.65 && wordMatches >= 1) ||
-    wordMatches >= 2 ||
-    contains;
+  // Penalize obvious garbage strings from OCR.
+  const garbagePenalty = /^(?:[a-z]\s*){1,3}$/i.test(b) ? 0.2 : 0;
 
-  return { match: isMatch, similarity: Math.min(similarity, 1.0) };
+  const anchorScore = firstSim * 0.55 + lastSim * 0.45;
+  const similarity = Math.max(
+    fullSim * 0.85 + wordSim * 0.35,
+    tokenOrderInvariantSim * 0.8 + wordSim * 0.4,
+    anchorScore * 0.9,
+    contains ? 0.84 : 0
+  );
+  const finalSimilarity = Math.max(0, Math.min(1, similarity - garbagePenalty));
+
+  // Match decision: allow missing middle name but require strong anchors/coverage.
+  const isMatch =
+    finalSimilarity >= 0.67 ||
+    (firstSim >= 0.86 && (lastSim >= 0.62 || coverage >= 0.5)) ||
+    (firstSim >= 0.78 && lastSim >= 0.70) ||
+    (contains && wordMatches >= 2);
+
+  return { match: isMatch, similarity: finalSimilarity };
 };
 
 // ─────────────────────────────────────────────
-// PUBLIC API
+// CANDIDATE SELECTION
 // ─────────────────────────────────────────────
 
-/**
- * Process ID card image — two-pass targeted OCR
- */
-export const extractIDText = async (imageBase64: string): Promise<IDScanResult> => {
+const pickBest = (candidates: string[], profileName?: string): { name: string; similarity: number } => {
+  if (candidates.length === 0) return { name: '', similarity: 0 };
+  if (!profileName) return { name: candidates[0], similarity: 0.5 };
+
+  let best = { name: candidates[0], similarity: 0 };
+  for (const c of candidates) {
+    const r = fuzzyNameMatch(profileName, c);
+    const words = c.split(' ').filter(Boolean);
+    const qualityBoost =
+      words.length <= 4 && words.every(w => w.length >= 2) && !/\b(PROGRAMME|REGISTER|VALID)\b/.test(c)
+        ? 0.03
+        : 0;
+    const score = Math.min(1, r.similarity + qualityBoost);
+    console.log(`  📊 "${c}" → ${(score * 100).toFixed(0)}% ${r.match ? '✓' : '✗'}`);
+    if (score > best.similarity) {
+      best = { name: c, similarity: score };
+    }
+  }
+
+  // If no good match, return first candidate (from "Name:" pattern)
+  if (best.similarity < 0.25) best.name = candidates[0];
+  return best;
+};
+
+const getBestSimilarityQuick = (
+  candidates: string[],
+  profileName?: string
+): { similarity: number; name: string } => {
+  if (!profileName || candidates.length === 0) return { similarity: 0, name: '' };
+
+  let bestSimilarity = 0;
+  let bestName = '';
+  for (const c of candidates) {
+    const r = fuzzyNameMatch(profileName, c);
+    const words = c.split(' ').filter(Boolean);
+    const qualityBoost =
+      words.length <= 4 && words.every(w => w.length >= 2) && !/\b(PROGRAMME|REGISTER|VALID)\b/.test(c)
+        ? 0.03
+        : 0;
+    const score = Math.min(1, r.similarity + qualityBoost);
+    if (score > bestSimilarity) {
+      bestSimilarity = score;
+      bestName = c;
+    }
+  }
+  return { similarity: bestSimilarity, name: bestName };
+};
+
+// ─────────────────────────────────────────────
+// MAIN OCR PIPELINE
+// ─────────────────────────────────────────────
+
+export const extractIDText = async (
+  imageBase64: string,
+  profileName?: string
+): Promise<IDScanResult> => {
   try {
-    console.log('🔍 Starting V3 two-pass OCR...');
+    console.log('🔍 Starting V5.0 OCR pipeline (robust low-quality ID support)...');
     const img = await loadImage(imageBase64);
     console.log(`📐 Image: ${img.width}×${img.height}`);
 
-    const { name, regNo, fullText, confidence } = await twoPassOCR(img);
+    const worker = await createWorker('eng', OEM.LSTM_ONLY);
+    await worker.setParameters({
+      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+      preserve_interword_spaces: '1',
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:().-/ ',
+    });
 
-    const isSRM = scoreSRMText(fullText) >= 15;
+    let allCandidates: string[] = [];
+    let bestText = '';
+    let bestScore = -1;
+    let bestRotation = 0;
+    let regNoDetected: string | null = null;
+    let bestSimilaritySnapshot = 0;
 
-    if (!name || name.length < 2) {
+    const runOCR = async (canvas: HTMLCanvasElement) => {
+      const { data } = await worker.recognize(canvas.toDataURL('image/png'));
+      return {
+        text: data.text || '',
+        score: scoreSRM(data.text || ''),
+      };
+    };
+
+    const dedupeCandidates = () =>
+      [...new Set(allCandidates)].filter((c) => c.length >= 3 && !/^\s*[A-Z]\s*$/.test(c));
+
+    const shouldEarlyStop = (quickSimilarity: number, currentScore: number, hasRegNo: boolean) => {
+      if (profileName) {
+        return quickSimilarity >= 0.9 && (currentScore >= 35 || hasRegNo);
+      }
+      return currentScore >= 85 && hasRegNo;
+    };
+
+    // Stage 1: quick orientation sweep (includes 180°)
+    const orientationResults: Array<{
+      deg: number;
+      score: number;
+      text: string;
+      candidates: string[];
+      canvas: HTMLCanvasElement;
+      quickSimilarity: number;
+      rank: number;
+    }> = [];
+
+    for (const deg of [0, 90, 180, 270]) {
+      const base = deg === 0 ? canvasFromImage(img) : rotateCanvas(img, deg);
+      const scaled = scaleUp(base, 1050);
+
+      const raw = await runOCR(scaled);
+      regNoDetected = regNoDetected || extractRegNo(raw.text);
+      let bestDegText = raw.text;
+      let bestDegScore = raw.score;
+      const degCandidates = [...extractCandidates(raw.text)];
+
+      // Only run secondary pass if quick pass looks weak.
+      if (bestDegScore < 58) {
+        const enhanced = enhanceContrast(scaled);
+        const enh = await runOCR(enhanced);
+        regNoDetected = regNoDetected || extractRegNo(enh.text);
+        degCandidates.push(...extractCandidates(enh.text));
+        if (enh.score > bestDegScore) {
+          bestDegScore = enh.score;
+          bestDegText = enh.text;
+        }
+      }
+
+      const quickSimilarity = getBestSimilarityQuick([...new Set(degCandidates)], profileName).similarity;
+      const rank = bestDegScore + quickSimilarity * 30;
+      orientationResults.push({
+        deg,
+        score: bestDegScore,
+        text: bestDegText,
+        candidates: [...new Set(degCandidates)],
+        canvas: scaled,
+        quickSimilarity,
+        rank,
+      });
+      console.log(`🔄 Rotation ${deg}° quick-score=${bestDegScore}, sim=${quickSimilarity.toFixed(2)}`);
+    }
+
+    orientationResults.sort((a, b) => b.rank - a.rank);
+    const bestOrientation = orientationResults[0];
+    const secondOrientation = orientationResults[1];
+    const strongPrimary =
+      !!bestOrientation &&
+      (bestOrientation.score >= 78 ||
+        (bestOrientation.quickSimilarity >= 0.88 && bestOrientation.score >= 30));
+    const secondIsClose =
+      !!bestOrientation &&
+      !!secondOrientation &&
+      bestOrientation.rank - secondOrientation.rank < 12;
+    const topOrientationCount = strongPrimary ? 1 : secondIsClose ? 2 : 1;
+    const topOrientations = orientationResults.slice(0, topOrientationCount);
+    if (topOrientations.length > 0) {
+      bestRotation = topOrientations[0].deg;
+      bestScore = topOrientations[0].score;
+      bestText = topOrientations[0].text;
+    }
+
+    for (const o of topOrientations) {
+      allCandidates.push(...o.candidates);
+    }
+
+    bestSimilaritySnapshot = getBestSimilarityQuick(dedupeCandidates(), profileName).similarity;
+
+    // Stage 2: deep pass on best rotations with focused crops and preprocessing variants
+    let earlyStop = shouldEarlyStop(bestSimilaritySnapshot, bestScore, !!regNoDetected);
+    for (const o of topOrientations) {
+      if (earlyStop) break;
+      console.log(`\n🧠 Deep scan for rotation ${o.deg}°`);
+      const focusCrops = buildCardFocusCrops(o.canvas);
+
+      for (let idx = 0; idx < focusCrops.length; idx++) {
+        if (earlyStop) break;
+        const crop = focusCrops[idx];
+        const enhanced = enhanceContrast(crop);
+        const variants: Array<{ label: string; canvas: HTMLCanvasElement }> = idx === 0
+          ? [
+              { label: 'raw-full', canvas: crop },
+              { label: 'enh-full', canvas: enhanced },
+            ]
+          : [
+              { label: `enh-${idx}`, canvas: enhanced },
+              { label: `bin-${idx}`, canvas: binarizeOtsu(enhanced) },
+            ];
+
+        // Heavy fallbacks only when still weak.
+        const needsHeavyFallback =
+          idx === 0 &&
+          bestScore < 55 &&
+          bestSimilaritySnapshot < 0.82;
+        if (needsHeavyFallback) {
+          variants.push({ label: 'sharp-full', canvas: sharpen(crop) });
+          variants.push({ label: 'iso-full', canvas: isolateText(crop, 175, 80) });
+        }
+
+        for (const variant of variants) {
+          const r = await runOCR(variant.canvas);
+          regNoDetected = regNoDetected || extractRegNo(r.text);
+          allCandidates.push(...extractCandidates(r.text));
+          if (r.score > bestScore) {
+            bestScore = r.score;
+            bestText = r.text;
+            bestRotation = o.deg;
+          }
+
+          bestSimilaritySnapshot = Math.max(
+            bestSimilaritySnapshot,
+            getBestSimilarityQuick(dedupeCandidates(), profileName).similarity
+          );
+          earlyStop = shouldEarlyStop(bestSimilaritySnapshot, bestScore, !!regNoDetected);
+          console.log(`  ${variant.label}: score=${r.score}`);
+          if (earlyStop) break;
+        }
+      }
+    }
+
+    // Bonus pass on best orientation using layout-aware segmentation.
+    const needsBonusPass =
+      bestScore >= 10 &&
+      !earlyStop &&
+      (bestScore < 60 || (profileName ? bestSimilaritySnapshot < 0.82 : !regNoDetected));
+    if (needsBonusPass) {
+      const base = bestRotation === 0 ? canvasFromImage(img) : rotateCanvas(img, bestRotation);
+      const scaled = scaleUp(base, 1450);
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+      const auto = await runOCR(scaled);
+      regNoDetected = regNoDetected || extractRegNo(auto.text);
+      allCandidates.push(...extractCandidates(auto.text));
+      if (auto.score > bestScore) {
+        bestScore = auto.score;
+        bestText = auto.text;
+      }
+
+      bestSimilaritySnapshot = Math.max(
+        bestSimilaritySnapshot,
+        getBestSimilarityQuick(dedupeCandidates(), profileName).similarity
+      );
+
+      // Sparse mode only if AUTO still weak.
+      if (bestScore < 55 || (profileName && bestSimilaritySnapshot < 0.8)) {
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+        const sparse = await runOCR(scaled);
+        regNoDetected = regNoDetected || extractRegNo(sparse.text);
+        allCandidates.push(...extractCandidates(sparse.text));
+        if (sparse.score > bestScore) {
+          bestScore = sparse.score;
+          bestText = sparse.text;
+        }
+      }
+
+      // Restore default for next calls in same session.
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK });
+    }
+
+    await worker.terminate();
+
+    console.log(`\n📄 Best text (score: ${bestScore}):`);
+    console.log(bestText.substring(0, 300));
+
+    // Deduplicate and remove obvious garbage candidates
+    allCandidates = dedupeCandidates();
+    console.log('\n🏷️ All candidates:', allCandidates);
+
+    const regNo = regNoDetected || extractRegNo(bestText);
+    const isSRM = bestScore >= 15;
+
+    // Pick best candidate
+    let finalName = '';
+    if (profileName && allCandidates.length > 0) {
+      console.log(`\n🎯 Matching against profile: "${profileName}"`);
+      const best = pickBest(allCandidates, profileName);
+      finalName = best.name;
+      console.log(`  ✅ Winner: "${finalName}" (${(best.similarity * 100).toFixed(0)}%)`);
+    } else if (allCandidates.length > 0) {
+      finalName = allCandidates[0];
+    }
+
+    if (!finalName || finalName.length < 2) {
       return {
         isValid: false,
-        error: 'Could not read the name from your ID. Please try with better lighting and ensure the full card is visible.',
+        error: 'Could not read the name from your ID. Try better lighting, avoid glare, and make sure the full card is visible.',
         imageBase64,
-        confidence: 0,
       };
     }
 
     return {
       isValid: true,
-      name: name.toUpperCase(),
+      name: finalName.toUpperCase(),
       idNumber: regNo || 'Unknown',
       collegeName: isSRM ? 'SRM Institute of Science and Technology' : 'Unknown College',
       imageBase64,
-      confidence,
+      confidence: Math.min(bestScore / 100, 1.0),
     };
   } catch (error) {
     console.error('OCR failed:', error);
@@ -641,7 +913,7 @@ export const extractIDText = async (imageBase64: string): Promise<IDScanResult> 
 };
 
 // ─────────────────────────────────────────────
-// CAMERA, STORAGE, UTILITY (unchanged)
+// CAMERA, STORAGE, UTILITY
 // ─────────────────────────────────────────────
 
 export const initializeOpenCV = (): Promise<void> => Promise.resolve();
@@ -653,12 +925,10 @@ export const captureFromCamera = async (): Promise<string> =>
     const ctx = canvas.getContext('2d');
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
-      .then((stream) => {
-        video.srcObject = stream;
-        video.play();
+      .then(stream => {
+        video.srcObject = stream; video.play();
         video.onloadedmetadata = () => {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
           setTimeout(() => {
             ctx?.drawImage(video, 0, 0);
             stream.getTracks().forEach(t => t.stop());
@@ -666,17 +936,16 @@ export const captureFromCamera = async (): Promise<string> =>
           }, 500);
         };
       })
-      .catch(e => reject(new Error(`Camera access failed: ${e.message}`)));
+      .catch(e => reject(new Error(`Camera: ${e.message}`)));
   });
 
-export const validateIDData = (data: IDScanResult): boolean =>
-  data.isValid && !!data.name && data.name.length >= 3;
+export const validateIDData = (d: IDScanResult) => d.isValid && !!d.name && d.name.length >= 3;
 
-const base64ToBlob = (base64: string): Blob => {
-  const bstr = atob(base64.split(',')[1]);
-  const u8 = new Uint8Array(bstr.length);
-  for (let i = 0; i < bstr.length; i++) u8[i] = bstr.charCodeAt(i);
-  return new Blob([u8], { type: 'image/jpeg' });
+const base64ToBlob = (b64: string) => {
+  const s = atob(b64.split(',')[1]);
+  const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return new Blob([u], { type: 'image/jpeg' });
 };
 
 export const uploadIDImage = async (imageBase64: string, userId: string): Promise<string | null> => {
@@ -714,12 +983,11 @@ export const checkIDVerification = async (userId: string): Promise<boolean> => {
   } catch { return false; }
 };
 
-export const getVerificationBadge = (isVerified: boolean) => ({
-  text: isVerified ? 'Verified Student' : 'Unverified',
-  color: isVerified ? 'text-green-600' : 'text-gray-500',
-  bg: isVerified ? 'bg-green-100' : 'bg-gray-100',
-  icon: isVerified ? '✓' : '○',
+export const getVerificationBadge = (v: boolean) => ({
+  text: v ? 'Verified Student' : 'Unverified',
+  color: v ? 'text-green-600' : 'text-gray-500',
+  bg: v ? 'bg-green-100' : 'bg-gray-100',
+  icon: v ? '✓' : '○',
 });
 
-export const formatIDNumber = (id: string): string =>
-  id.length <= 4 ? id : `****${id.slice(-4)}`;
+export const formatIDNumber = (id: string) => id.length <= 4 ? id : `****${id.slice(-4)}`;
