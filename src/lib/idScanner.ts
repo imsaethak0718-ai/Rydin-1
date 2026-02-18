@@ -14,6 +14,56 @@ export interface IDScanResult {
 }
 
 /**
+ * Compute Levenshtein distance between two strings
+ */
+const levenshtein = (a: string, b: string): number => {
+  const matrix: number[][] = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      const cost = b[i - 1] === a[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[b.length][a.length];
+};
+
+/**
+ * Fuzzy name matching — returns similarity score (0-1)
+ * Handles OCR quirks like extra spaces, casing, minor typos
+ */
+export const fuzzyNameMatch = (profileName: string, idName: string): { match: boolean; similarity: number } => {
+  // Normalize: lowercase, trim, collapse spaces
+  const normalize = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+
+  const a = normalize(profileName);
+  const b = normalize(idName);
+
+  if (a === b) return { match: true, similarity: 1.0 };
+  if (!a || !b) return { match: false, similarity: 0 };
+
+  const maxLen = Math.max(a.length, b.length);
+  const dist = levenshtein(a, b);
+  const similarity = 1 - dist / maxLen;
+
+  // Also check if one contains the other (handles middle names
+  // e.g., profile: "Anurag Pandey" vs ID: "Anurag Kumar Pandey")
+  const containsMatch = a.includes(b) || b.includes(a);
+
+  return {
+    match: similarity >= 0.75 || containsMatch,
+    similarity: containsMatch ? Math.max(similarity, 0.85) : similarity,
+  };
+};
+
+/**
  * Initialize OpenCV.js
  */
 export const initializeOpenCV = (): Promise<void> => {
@@ -89,10 +139,10 @@ export const extractIDText = async (imageBase64: string): Promise<IDScanResult> 
 
     // Basic regex patterns for student IDs
     // Adjust these based on common ID formats
-    const nameMatch = text.match(/Name[:\s]+([A-Za-z\s]+)/i) || 
-                      text.match(/^([A-Z][a-z]+ [A-Z][a-z]+)/m);
+    const nameMatch = text.match(/Name[:\s]+([A-Za-z\s]+)/i) ||
+      text.match(/^([A-Z][a-z]+ [A-Z][a-z]+)/m);
     const idMatch = text.match(/(?:ID|Roll|Reg)(?:[\s#:]+)([A-Z0-9]+)/i) ||
-                    text.match(/([A-Z]{2,}\d{6,})/);
+      text.match(/([A-Z]{2,}\d{6,})/);
     const collegeMatch = text.match(/(?:College|University|Institute)[\s\w]+/i);
 
     const result: IDScanResult = {
@@ -138,21 +188,21 @@ export const uploadIDImage = async (
 ): Promise<string | null> => {
   try {
     const { supabase } = await import('@/integrations/supabase/client');
-    
+
     const blob = base64ToBlob(imageBase64);
     const fileName = `id-${userId}-${Date.now()}.jpg`;
 
     const { data, error } = await supabase.storage
-      .from('id-verifications')
+      .from('user-verifications')
       .upload(fileName, blob, {
         cacheControl: '3600',
-        upsert: false,
+        upsert: true,
       });
 
     if (error) throw error;
 
     const { data: urlData } = supabase.storage
-      .from('id-verifications')
+      .from('user-verifications')
       .getPublicUrl(data.path);
 
     return urlData.publicUrl;
@@ -188,26 +238,40 @@ export const saveIDVerification = async (
   try {
     const { supabase } = await import('@/integrations/supabase/client');
 
+    // Use user_verifications table with correct column names
     const { error } = await supabase
-      .from('id_verifications')
+      .from('user_verifications')
       .upsert({
         user_id: userId,
-        id_image_url: imageUrl,
-        extracted_name: data.name,
-        extracted_id_number: data.idNumber,
-        college_name: data.collegeName,
-        verification_status: 'verified',
-        is_valid: true,
-        verified_at: new Date().toISOString(),
-      });
+        name: data.name || 'Unknown',
+        id_number: data.idNumber || 'Unknown',
+        college_name: data.collegeName || 'Unknown',
+        photo_url: imageUrl,
+        verified: true,
+      }, { onConflict: 'user_id' });
 
-    if (error) throw error;
+    if (error) {
+      console.error('ID verification upsert error:', error);
+      throw error;
+    }
 
-    // Update profile with verified badge
-    await supabase
-      .from('profiles')
-      .update({ phone_verified: true })
-      .eq('id', userId);
+    // Update profile — try with identity_verified first, fallback to phone_verified only
+    try {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ identity_verified: true, phone_verified: true })
+        .eq('id', userId);
+
+      if (profileError) {
+        console.warn('Profile update with identity_verified failed, trying fallback:', profileError.message);
+        await supabase
+          .from('profiles')
+          .update({ phone_verified: true })
+          .eq('id', userId);
+      }
+    } catch (profileErr) {
+      console.warn('Profile badge update failed (non-critical):', profileErr);
+    }
 
     return true;
   } catch (error) {
@@ -224,10 +288,10 @@ export const checkIDVerification = async (userId: string): Promise<boolean> => {
     const { supabase } = await import('@/integrations/supabase/client');
 
     const { data, error } = await supabase
-      .from('id_verifications')
-      .select('id')
+      .from('user_verifications')
+      .select('user_id')
       .eq('user_id', userId)
-      .eq('verification_status', 'verified')
+      .eq('verified', true)
       .maybeSingle();
 
     if (error) throw error;

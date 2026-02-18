@@ -1,13 +1,17 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { User, Phone, GraduationCap, Building, ArrowRight, AlertCircle, Camera, Check, X } from "lucide-react";
+import {
+  User, Phone, GraduationCap, Building, ArrowRight,
+  AlertCircle, Camera, Check, X, Upload, Image as ImageIcon
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadProfilePhoto, saveAvatarUrl } from "@/lib/photoCapture";
 
 const departments = [
   "Computer Science", "Electronics", "Mechanical", "Civil",
@@ -15,7 +19,7 @@ const departments = [
 ];
 
 const ProfileSetup = () => {
-  const [step, setStep] = useState<"profile" | "id-scan" | "complete">("profile");
+  const [step, setStep] = useState<"profile" | "photo" | "complete">("profile");
   const [name, setName] = useState("");
   const [department, setDepartment] = useState("");
   const [year, setYear] = useState("");
@@ -25,14 +29,13 @@ const ProfileSetup = () => {
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // ID Scanning state
-  const [idName, setIdName] = useState("");
-  const [idNumber, setIdNumber] = useState("");
-  const [collegeName, setCollegeName] = useState("");
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // Photo state
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoFile, setPhotoFile] = useState<string | File | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { updateProfile, user } = useAuth();
   const navigate = useNavigate();
@@ -44,6 +47,15 @@ const ProfileSetup = () => {
     }
   }, [user?.profile_complete, navigate]);
 
+  // Clean up camera on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !department || !year || !phone || !gender) {
@@ -54,41 +66,53 @@ const ProfileSetup = () => {
       });
       return;
     }
-    setStep("id-scan");
+    setStep("photo");
   };
+
+  // ── Camera functions ───────────────────────────────────────────────────
 
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 640 } }
       });
       setCameraStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
       setShowCamera(true);
+      // Wait for ref to be available
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 100);
     } catch (error) {
       toast({
         title: "Camera Access Denied",
-        description: "Please allow camera access to scan your ID",
+        description: "Please allow camera access to take a photo",
         variant: "destructive",
       });
     }
   };
 
-  const captureIDPhoto = async () => {
+  const capturePhoto = () => {
     if (!videoRef.current) return;
-
     const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    if (!context) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    context.drawImage(videoRef.current, 0, 0);
+    // Capture square crop from center
+    const vw = videoRef.current.videoWidth;
+    const vh = videoRef.current.videoHeight;
+    const size = Math.min(vw, vh);
+    canvas.width = size;
+    canvas.height = size;
 
-    const imageData = canvas.toDataURL("image/jpeg");
-    setPhotoUrl(imageData);
+    const sx = (vw - size) / 2;
+    const sy = (vh - size) / 2;
+    ctx.drawImage(videoRef.current, sx, sy, size, size, 0, 0, size, size);
+
+    const imageData = canvas.toDataURL("image/jpeg", 0.85);
+    setPhotoPreview(imageData);
+    setPhotoFile(imageData);
     stopCamera();
   };
 
@@ -100,107 +124,29 @@ const ProfileSetup = () => {
     setShowCamera(false);
   };
 
-  const compressImage = async (base64Data: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.src = base64Data;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const maxWidth = 600;
-        const maxHeight = 800;
-        let width = img.width;
-        let height = img.height;
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-        if (width > height) {
-          if (width > maxWidth) {
-            height *= maxWidth / width;
-            width = maxWidth;
-          }
-        } else {
-          if (height > maxHeight) {
-            width *= maxHeight / height;
-            height = maxHeight;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-        }
-
-        // Compress to 70% quality (reduces size significantly)
-        resolve(canvas.toDataURL("image/jpeg", 0.7));
-      };
-    });
+    // Preview
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setPhotoPreview(ev.target?.result as string);
+      setPhotoFile(file);
+    };
+    reader.readAsDataURL(file);
   };
 
-  const uploadIDPhoto = async (base64Data: string) => {
-    if (!user?.id) return null;
-
-    try {
-      // Compress image first
-      const compressedData = await compressImage(base64Data);
-
-      // Convert base64 to blob
-      const response = await fetch(compressedData);
-      const blob = await response.blob();
-
-      const fileName = `${user.id}-${Date.now()}.jpg`;
-      const { data, error } = await supabase.storage
-        .from("id-verifications")
-        .upload(fileName, blob, { cacheControl: "3600", upsert: false });
-
-      if (error) throw error;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from("id-verifications")
-        .getPublicUrl(fileName);
-
-      return publicUrl;
-    } catch (error) {
-      console.error("Upload error:", error);
-      return null;
-    }
+  const removePhoto = () => {
+    setPhotoPreview(null);
+    setPhotoFile(null);
   };
 
-  const saveIDVerification = async (photoUrl: string) => {
-    if (!user?.id) return;
+  // ── Final submit ───────────────────────────────────────────────────────
 
-    try {
-      const { error } = await supabase.from("id_verifications").upsert({
-        user_id: user.id,
-        name: idName,
-        id_number: idNumber,
-        college_name: collegeName,
-        photo_url: photoUrl,
-        verified: false,
-      }, { onConflict: 'user_id' });
-
-      if (error) throw error;
-      return true;
-    } catch (error) {
-      console.error("Save ID verification error:", error);
-      return false;
-    }
-  };
-
-  const handleIDScanSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!idName || !idNumber || !collegeName) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all ID details",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  const handleCompleteSetup = async () => {
     setIsLoading(true);
 
-    // We update the profile data IMMEDIATELY in local state to prevent the redirect loop
-    // Even if it hangs in the DB, the local user object will have profile_complete=true
     const profileData = {
       name,
       department,
@@ -209,42 +155,37 @@ const ProfileSetup = () => {
       gender: gender as "male" | "female" | "other",
       emergency_contact_name: emergencyName,
       emergency_contact_phone: emergencyPhone,
-      profile_complete: true
+      profile_complete: true,
     };
 
-    // 1. Kick off the DB update early but DON'T let it block the UI transition
+    // Start all tasks
     const setupTasks = async () => {
       try {
-        // Run profile update first as it's most critical for navigation
         await updateProfile(profileData as any);
-        console.log("✅ Profile update task finished");
+        console.log("✅ Profile updated");
 
-        // Then handle photo upload in parallel
-        if (photoUrl && photoUrl.startsWith("data:")) {
-          const uploadedUrl = await uploadIDPhoto(photoUrl);
-          if (uploadedUrl) {
-            await saveIDVerification(uploadedUrl);
+        // Upload photo if provided
+        if (photoFile && user?.id) {
+          const url = await uploadProfilePhoto(user.id, photoFile);
+          if (url) {
+            await saveAvatarUrl(user.id, url);
+            console.log("✅ Profile photo uploaded");
           }
         }
       } catch (e) {
-        console.warn("Background setup tasks had issues:", e);
+        console.warn("Setup tasks had issues:", e);
       }
     };
 
     setupTasks();
 
-    // 2. FORCE PROGRESSION after 3.5 seconds
+    // Force progression after 3.5 seconds
     setTimeout(() => {
       setStep("complete");
       setIsLoading(false);
 
-      // Navigate to home after another 1.5s
       setTimeout(() => {
-        // Final sanity check: if the context hasn't updated the user yet,
-        // we might still loop. But updateProfile handles state update.
         navigate("/", { replace: true });
-
-        // Force refresh only as absolute last resort
         setTimeout(() => {
           if (window.location.pathname === "/profile-setup") {
             window.location.href = "/";
@@ -274,15 +215,22 @@ const ProfileSetup = () => {
             </div>
 
             <form onSubmit={handleProfileSubmit} className="space-y-3 sm:space-y-4">
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Full name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm"
-                  required
-                />
+              {/* Name field with college ID hint */}
+              <div className="space-y-1.5">
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Full name (as per college ID)"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="pl-10 h-12 sm:h-11 bg-card text-base sm:text-sm"
+                    required
+                  />
+                </div>
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 pl-1 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3 shrink-0" />
+                  Enter your name exactly as it appears on your college ID card
+                </p>
               </div>
 
               <Select value={department} onValueChange={setDepartment} required>
@@ -377,12 +325,12 @@ const ProfileSetup = () => {
           </>
         )}
 
-        {/* Step 2: ID Scanning */}
-        {step === "id-scan" && (
+        {/* Step 2: Profile Photo (optional) */}
+        {step === "photo" && (
           <>
-            <h1 className="text-2xl sm:text-3xl font-bold font-display text-center mb-1">Verify your Identity</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold font-display text-center mb-1">Add your photo</h1>
             <p className="text-center text-muted-foreground text-sm sm:text-base mb-6 sm:mb-8">
-              Scan or upload your college ID for verification
+              This helps others recognize you — you can skip this for now
             </p>
             <div className="flex gap-2 mb-6 justify-center">
               <div className="w-3 h-3 rounded-full bg-primary"></div>
@@ -391,90 +339,94 @@ const ProfileSetup = () => {
 
             {showCamera ? (
               <div className="space-y-4">
-                <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+                <div className="relative bg-black rounded-2xl overflow-hidden aspect-square max-w-[280px] mx-auto">
                   <video
                     ref={videoRef}
                     autoPlay
                     playsInline
+                    muted
                     className="w-full h-full object-cover"
                   />
+                  {/* Circular overlay guide */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-[85%] h-[85%] rounded-full border-2 border-white/40 border-dashed" />
+                  </div>
                 </div>
                 <div className="flex gap-3">
-                  <Button
-                    type="button"
-                    onClick={captureIDPhoto}
-                    className="flex-1"
-                  >
+                  <Button type="button" onClick={capturePhoto} className="flex-1 h-12">
                     <Camera className="w-4 h-4 mr-2" />
                     Capture
                   </Button>
-                  <Button
-                    type="button"
-                    onClick={stopCamera}
-                    variant="outline"
-                    className="flex-1"
-                  >
+                  <Button type="button" onClick={stopCamera} variant="outline" className="flex-1 h-12">
                     <X className="w-4 h-4 mr-2" />
                     Cancel
                   </Button>
                 </div>
               </div>
             ) : (
-              <form onSubmit={handleIDScanSubmit} className="space-y-4">
-                {photoUrl && (
-                  <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-                    <Check className="w-4 h-4 text-green-600" />
-                    <span className="text-sm text-green-700">Photo captured</span>
-                  </div>
-                )}
+              <div className="space-y-5">
+                {/* Photo preview / placeholder */}
+                <div className="flex flex-col items-center">
+                  {photoPreview ? (
+                    <div className="relative">
+                      <div className="w-36 h-36 rounded-full overflow-hidden border-4 border-primary/20 shadow-lg">
+                        <img
+                          src={photoPreview}
+                          alt="Profile preview"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={removePhoto}
+                        className="absolute -top-1 -right-1 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-36 h-36 rounded-full bg-muted border-4 border-dashed border-border flex flex-col items-center justify-center">
+                      <ImageIcon className="w-8 h-8 text-muted-foreground/40" />
+                      <p className="text-[10px] text-muted-foreground mt-1">No photo yet</p>
+                    </div>
+                  )}
+                </div>
 
-                <div className="flex gap-2">
+                {/* Upload options */}
+                <div className="flex gap-3">
                   <Button
                     type="button"
                     onClick={startCamera}
-                    className="flex-1"
                     variant="outline"
+                    className="flex-1 h-12"
                   >
                     <Camera className="w-4 h-4 mr-2" />
-                    Take Photo
+                    Take Selfie
                   </Button>
+                  <label className="flex-1">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full h-12"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Upload className="w-4 h-4 mr-2" />
+                      Upload
+                    </Button>
+                  </label>
                 </div>
 
-                <div className="border-t border-border pt-4 space-y-4">
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Full name (from ID)"
-                      value={idName}
-                      onChange={(e) => setIdName(e.target.value)}
-                      className="pl-10 h-12 sm:h-11 bg-card"
-                      required
-                    />
-                  </div>
-
-                  <div className="relative">
-                    <Input
-                      placeholder="ID Number"
-                      value={idNumber}
-                      onChange={(e) => setIdNumber(e.target.value)}
-                      className="h-12 sm:h-11 bg-card"
-                      required
-                    />
-                  </div>
-
-                  <div className="relative">
-                    <Building className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      placeholder="College Name"
-                      value={collegeName}
-                      onChange={(e) => setCollegeName(e.target.value)}
-                      className="pl-10 h-12 sm:h-11 bg-card"
-                      required
-                    />
-                  </div>
-
+                {/* Action buttons */}
+                <div className="space-y-2 pt-2">
                   <Button
-                    type="submit"
+                    onClick={handleCompleteSetup}
                     disabled={isLoading}
                     className="w-full h-12 sm:h-11 font-semibold gap-2"
                   >
@@ -485,13 +437,25 @@ const ProfileSetup = () => {
                       </>
                     ) : (
                       <>
-                        Complete Setup
+                        {photoPreview ? "Complete Setup" : "Skip & Complete Setup"}
                         <Check className="w-4 h-4" />
                       </>
                     )}
                   </Button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStep("profile")}
+                    className="w-full text-sm text-muted-foreground hover:text-foreground py-2"
+                  >
+                    ← Go Back
+                  </button>
                 </div>
-              </form>
+
+                <p className="text-xs text-muted-foreground text-center">
+                  📷 You can always add or change your photo later from your profile
+                </p>
+              </div>
             )}
           </>
         )}
