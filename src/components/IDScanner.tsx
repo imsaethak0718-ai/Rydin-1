@@ -39,7 +39,7 @@ export const IDScanner = ({ userId, userName, onSuccess, onCancel }: IDScannerPr
       setStep('processing');
 
       // Extract text from image via OCR
-      const result = await extractIDText(imageBase64);
+      const result = await extractIDText(imageBase64, userName);
       setScanResult(result);
 
       if (result.isValid && result.name) {
@@ -79,7 +79,7 @@ export const IDScanner = ({ userId, userName, onSuccess, onCancel }: IDScannerPr
         setCapturedImage(imageBase64);
         setStep('processing');
 
-        const result = await extractIDText(imageBase64);
+        const result = await extractIDText(imageBase64, userName);
         setScanResult(result);
 
         if (result.isValid && result.name) {
