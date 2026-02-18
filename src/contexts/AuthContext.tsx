@@ -16,10 +16,10 @@ export interface Profile {
   emergency_contact_phone?: string;
   trust_score: number;
   profile_complete: boolean;
-  phone_verified: boolean;
   upi_id?: string;
   avatar_url?: string;
   identity_verified: boolean;
+  email_confirmed_at?: string | null;
 }
 
 interface AuthContextType {
@@ -28,6 +28,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   signUp: (email: string, password: string) => Promise<void>;
+  verifyOtp: (email: string, token: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<Profile>) => Promise<void>;
@@ -118,10 +119,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         emergency_contact_phone: data.emergency_contact_phone,
         trust_score: data.trust_score ?? 4.0,
         profile_complete: !!data.profile_complete,
-        phone_verified: !!data.phone_verified,
         upi_id: data.upi_id,
         avatar_url: data.avatar_url || undefined,
         identity_verified: !!data.identity_verified,
+        email_confirmed_at: supabaseUser.email_confirmed_at,
       };
       setUser(profile);
       console.log("✅ Profile loaded. profile_complete =", profile.profile_complete);
@@ -148,7 +149,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: supabaseUser.user_metadata?.full_name || "User",
       trust_score: 4.0,
       profile_complete: false,
-      phone_verified: false,
       identity_verified: false,
     };
 
@@ -172,7 +172,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           name: supabaseUser.user_metadata?.full_name || "User",
           trust_score: 4.0,
           profile_complete: false,
-          phone_verified: false,
         }),
         signal: upsertController.signal,
       });
@@ -211,6 +210,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (error) throw error;
 
         if (mounted && currentSession?.user) {
+          const email = currentSession.user.email || "";
+          // ── SRM domain check ──
+          if (!email.toLowerCase().endsWith("@srmist.edu.in")) {
+            console.warn("🚫 Non-SRM session blocked on init:", email);
+            await supabase.auth.signOut();
+            localStorage.setItem("rydin:blocked_email", email);
+            if (mounted) setIsLoading(false);
+            return;
+          }
+          // ── Email verification check ──
+          if (!currentSession.user.email_confirmed_at) {
+            console.warn("📧 Unverified email, blocking session:", email);
+            await supabase.auth.signOut();
+            localStorage.setItem("rydin:pending_verification", email);
+            if (mounted) setIsLoading(false);
+            return;
+          }
           setSession(currentSession);
           await fetchProfile(currentSession.user, currentSession);
         }
@@ -241,6 +257,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("🔔 Auth state change:", event);
       if (!mounted) return;
 
+      // ── SRM domain enforcement for OAuth (Google) ──────────────────────
+      if (newSession?.user) {
+        const email = newSession.user.email || "";
+        if (!email.toLowerCase().endsWith("@srmist.edu.in")) {
+          console.warn("🚫 Non-SRM email blocked:", email);
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+          localStorage.setItem("rydin:blocked_email", email);
+          return;
+        }
+        // ── Block unverified email signups ──
+        if (!newSession.user.email_confirmed_at) {
+          console.warn("📧 Unverified signup session, blocking:", email);
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+          localStorage.setItem("rydin:pending_verification", email);
+          return;
+        }
+      }
+      // ───────────────────────────────────────────────────────────────────
+
       setSession(newSession);
 
       if (newSession?.user) {
@@ -260,6 +299,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     const { error } = await supabase.auth.signUp({ email, password });
+    if (error) throw new Error(error.message);
+  };
+
+  const verifyOtp = async (email: string, token: string) => {
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token,
+      type: "signup",
+    });
     if (error) throw new Error(error.message);
   };
 
@@ -362,6 +410,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!session?.user,
         isLoading,
         signUp,
+        verifyOtp,
         login,
         logout,
         updateProfile,

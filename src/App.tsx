@@ -57,8 +57,23 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     return <Navigate to="/auth" replace />;
   }
 
+  // Wait for user profile to load before making a decision
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-muted-foreground">Loading profile...</p>
+      </div>
+    );
+  }
+
+  // Strictly block unverified users
+  if (!user.email_confirmed_at) {
+    console.log("� Email not verified, redirecting to /auth for OTP");
+    return <Navigate to="/auth" replace />;
+  }
+
   // CRITICAL FIX: Don't redirect if we are ALREADY on the profile setup page
-  if (user && !user.profile_complete && location.pathname !== "/profile-setup") {
+  if (!user.profile_complete && location.pathname !== "/profile-setup") {
     console.log("📝 Profile incomplete, redirecting to /profile-setup");
     return <Navigate to="/profile-setup" replace />;
   }
@@ -84,13 +99,13 @@ const AuthRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  // If user is fully authenticated with profile complete, redirect to home
-  if (isAuthenticated) {
+  // If user is fully authenticated and VERIFIED, redirect to app
+  if (isAuthenticated && user?.email_confirmed_at) {
     if (user?.profile_complete) {
-      console.log("✅ AuthRoute: Already authenticated, redirecting to /");
+      console.log("✅ AuthRoute: Authenticated & verified, redirecting to /");
       return <Navigate to="/" replace />;
     } else {
-      console.log("⚠️ AuthRoute: Authenticated but profile incomplete, redirecting to /profile-setup");
+      console.log("⚠️ AuthRoute: Authenticated & verified but profile incomplete, redirecting to /profile-setup");
       return <Navigate to="/profile-setup" replace />;
     }
   }
