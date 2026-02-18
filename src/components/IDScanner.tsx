@@ -174,7 +174,10 @@ export const IDScanner = ({ userId, userName, onSuccess, onCancel }: IDScannerPr
             >
               <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
                 <p className="text-sm text-blue-800 dark:text-blue-200">
-                  📋 Upload your <strong>college ID card</strong>. We'll read the name from it and match it with your profile name <strong>"{userName}"</strong> to verify you're a real student.
+                  📋 Upload your <strong>SRM ID card</strong> photo. We'll automatically detect the orientation, enhance the image, and read your name. It will be matched with your profile name <strong>"{userName}"</strong> to verify you.
+                </p>
+                <p className="text-xs text-blue-600 dark:text-blue-300 mt-2">
+                  ✅ Works with rotated, blurry, or low-quality photos
                 </p>
               </div>
 
@@ -226,7 +229,7 @@ export const IDScanner = ({ userId, userName, onSuccess, onCancel }: IDScannerPr
               </div>
 
               <p className="text-xs text-muted-foreground text-center">
-                💡 Make sure ID is clear, readable, and face-up
+                💡 Any orientation works — we auto-detect and rotate
               </p>
 
               <Button variant="outline" onClick={onCancel} className="w-full">
@@ -247,8 +250,8 @@ export const IDScanner = ({ userId, userName, onSuccess, onCancel }: IDScannerPr
                 <Loader className="w-10 h-10 animate-spin text-primary" />
               </div>
               <div className="text-center space-y-1">
-                <p className="text-sm font-medium">Reading your ID card...</p>
-                <p className="text-xs text-muted-foreground">This may take a few seconds</p>
+                <p className="text-sm font-medium">Processing your ID card...</p>
+                <p className="text-xs text-muted-foreground">Enhancing image → Detecting orientation → Reading text</p>
               </div>
             </motion.div>
           )}
@@ -377,8 +380,8 @@ export const IDScanner = ({ userId, userName, onSuccess, onCancel }: IDScannerPr
 
               <div className="bg-amber-50 dark:bg-amber-950/20 rounded-lg p-3 border border-amber-200 dark:border-amber-800">
                 <p className="text-xs text-amber-800 dark:text-amber-200">
-                  💡 <strong>Tip:</strong> Make sure your profile name matches your college ID exactly.
-                  Go to <strong>Edit Profile</strong> to update your name, then try again.
+                  💡 <strong>Tips:</strong> 1) Make sure your profile name matches your ID card name. 2) Try a clearer photo with less glare. 3) Hold the card steady — any orientation is fine.
+                  Go to <strong>Edit Profile</strong> to update your name if needed.
                 </p>
               </div>
 
