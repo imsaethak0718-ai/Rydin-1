@@ -30,6 +30,7 @@ interface AuthContextType {
   signUp: (email: string, password: string) => Promise<void>;
   verifyOtp: (email: string, token: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<Profile>) => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -316,6 +317,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw new Error(error.message);
   };
 
+  const loginWithGoogle = async () => {
+    const redirectTo =
+      typeof window !== "undefined" ? `${window.location.origin}/auth` : undefined;
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: redirectTo ? { redirectTo } : undefined,
+    });
+
+    if (error) throw new Error(error.message);
+  };
+
   const logout = async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -412,6 +425,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signUp,
         verifyOtp,
         login,
+        loginWithGoogle,
         logout,
         updateProfile,
         refreshProfile,

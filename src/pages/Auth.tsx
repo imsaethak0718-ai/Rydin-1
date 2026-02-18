@@ -13,7 +13,7 @@ const Auth = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const { login, signUp, verifyOtp, isAuthenticated, user } = useAuth();
+  const { login, signUp, verifyOtp, loginWithGoogle, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -160,6 +160,20 @@ const Auth = () => {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setIsLoading(true);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      toast({
+        title: "Google Sign In Failed",
+        description: err.message || "Unable to continue with Google",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
       <motion.div
@@ -289,6 +303,25 @@ const Auth = () => {
                 ) : (
                   "Sign In"
                 )}
+              </Button>
+
+              <div className="relative py-1">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">or</span>
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isLoading}
+                className="w-full h-12 text-base font-semibold"
+                onClick={handleGoogleSignIn}
+              >
+                Continue with Google
               </Button>
             </form>
 
