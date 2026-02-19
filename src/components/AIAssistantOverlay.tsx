@@ -76,7 +76,7 @@ const AIAssistantOverlay = () => {
         fetchTrips();
     }, [isAuthenticated, user?.id, isOpen]);
 
-    const generateAIResponse = (userMessage: string): Message => {
+    const generateFallbackResponse = (userMessage: string): Message => {
         const lower = userMessage.toLowerCase();
         let response = "";
         let actions: Message["actions"] = [];
@@ -137,6 +137,48 @@ const AIAssistantOverlay = () => {
         };
     };
 
+    const generateGroqResponse = async (userMessage: string): Promise<Message | null> => {
+        const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+        if (!apiKey) return null;
+
+        try {
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    messages: [
+                        {
+                            role: "system",
+                            content: "You are Rydin Assistant, a helpful and safety-conscious travel assistant for students at SRM University. You help with travel routes, cost savings, and finding co-passengers using 'Hopper'. Be concise, friendly, and use emojis."
+                        },
+                        { role: "user", content: userMessage }
+                    ],
+                    model: "llama-3.3-70b-versatile"
+                })
+            });
+
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            const content = data.choices[0]?.message?.content || null;
+
+            if (!content) return null;
+
+            return {
+                id: Date.now().toString(),
+                type: "assistant",
+                content: content,
+                timestamp: new Date()
+            };
+        } catch (error) {
+            console.error("Groq API error:", error);
+            return null;
+        }
+    };
+
     const handleSendMessage = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
         if (!input.trim() || isLoading) return;
@@ -153,12 +195,18 @@ const AIAssistantOverlay = () => {
         setInput("");
         setIsLoading(true);
 
-        // Natural delay logic
-        const delay = Math.min(1500, Math.max(800, currentInput.length * 20));
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        // Try Groq API first
+        let response = await generateGroqResponse(currentInput);
 
-        const response = generateAIResponse(currentInput);
-        setMessages((prev) => [...prev, response]);
+        // If Groq fails or no key, fallback to local logic with delay
+        if (!response) {
+            // Natural delay logic for fallback
+            const delay = Math.min(1500, Math.max(800, currentInput.length * 20));
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            response = generateFallbackResponse(currentInput);
+        }
+
+        setMessages((prev) => [...prev, response!]);
         setIsLoading(false);
     };
 
