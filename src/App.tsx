@@ -20,7 +20,6 @@ import Admin from "./pages/Admin";
 import Events from "./pages/Events";
 import Hopper from "./pages/Hopper";
 import Travel from "./pages/Travel";
-import AIAssistant from "./pages/AIAssistant";
 import Profile from "./pages/Profile";
 import Chat from "./pages/Chat";
 import Search from "./pages/Search";
@@ -29,6 +28,9 @@ import Activity from "./pages/Activity";
 import RideChat from "./pages/RideChat";
 import DirectChat from "./pages/DirectChat";
 import ProfileEdit from "./pages/ProfileEdit";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
+import AIAssistantOverlay from "./components/AIAssistantOverlay";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -139,14 +141,12 @@ const AppRoutes = () => (
     <Route path="/events" element={<ProtectedRoute><Events /></ProtectedRoute>} />
     <Route path="/hopper" element={<ProtectedRoute><Hopper /></ProtectedRoute>} />
     <Route path="/travel" element={<ProtectedRoute><Travel /></ProtectedRoute>} />
-    <Route path="/ai" element={<ProtectedRoute><AIAssistant /></ProtectedRoute>} />
     <Route path="/create" element={<ProtectedRoute><CreateRide /></ProtectedRoute>} />
     <Route path="/create-split" element={<ProtectedRoute><CreateSplit /></ProtectedRoute>} />
     <Route path="/split/:shareToken" element={<ViewSplit />} />
     <Route path="/settlement" element={<ProtectedRoute><Settlement /></ProtectedRoute>} />
     <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
     <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
-    <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
     <Route path="/profile-edit" element={<ProtectedRoute><ProfileEdit /></ProtectedRoute>} />
     <Route path="/transport" element={<ProtectedRoute><Transport /></ProtectedRoute>} />
@@ -154,6 +154,8 @@ const AppRoutes = () => (
     <Route path="/ride-chat" element={<ProtectedRoute><RideChat /></ProtectedRoute>} />
     <Route path="/chat/:userId" element={<ProtectedRoute><DirectChat /></ProtectedRoute>} />
     <Route path="/chat" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
+    <Route path="/terms" element={<Terms />} />
+    <Route path="/privacy" element={<Privacy />} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );
@@ -175,6 +177,7 @@ const App = () => {
             <Sonner />
             <BrowserRouter>
               <AppRoutes />
+              <AIAssistantOverlay />
             </BrowserRouter>
           </AuthProvider>
         </TooltipProvider>
