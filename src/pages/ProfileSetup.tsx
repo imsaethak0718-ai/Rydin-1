@@ -41,11 +41,28 @@ const ProfileSetup = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
+  // Pre-populate fields from existing user data
+  useEffect(() => {
+    if (user) {
+      if (user.name && user.name !== "User" && !name) setName(user.name);
+      if (user.department && !department) setDepartment(user.department);
+      if (user.year && !year) setYear(user.year);
+      if (user.phone && !phone) setPhone(user.phone);
+      if (user.gender && !gender) setGender(user.gender);
+      if (user.emergency_contact_name && !emergencyName) setEmergencyName(user.emergency_contact_name);
+      if (user.emergency_contact_phone && !emergencyPhone) setEmergencyPhone(user.emergency_contact_phone);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user?.profile_complete) {
-      navigate("/", { replace: true });
+      // If profile is already complete, redirect to home
+      // Only do this if we are not in the "complete" animation state
+      if (step !== "complete") {
+        navigate("/", { replace: true });
+      }
     }
-  }, [user?.profile_complete, navigate]);
+  }, [user?.profile_complete, navigate, step]);
 
   // Clean up camera on unmount
   useEffect(() => {
@@ -158,41 +175,47 @@ const ProfileSetup = () => {
       profile_complete: true,
     };
 
-    // Start all tasks
-    const setupTasks = async () => {
-      try {
-        await updateProfile(profileData as any);
-        console.log("✅ Profile updated");
+    try {
+      // 1. Update Profile Primary Data
+      await updateProfile(profileData as any);
+      console.log("✅ Profile updated");
 
-        // Upload photo if provided
-        if (photoFile && user?.id) {
+      // 2. Upload photo if provided
+      if (photoFile && user?.id) {
+        try {
           const url = await uploadProfilePhoto(user.id, photoFile);
           if (url) {
             await saveAvatarUrl(user.id, url);
             console.log("✅ Profile photo uploaded");
           }
+        } catch (photoErr) {
+          console.warn("Photo upload failed, but profile data is saved:", photoErr);
+          toast({
+            title: "Photo not saved",
+            description: "Your profile was saved but we couldn't upload your photo.",
+            variant: "destructive"
+          });
         }
-      } catch (e) {
-        console.warn("Setup tasks had issues:", e);
       }
-    };
 
-    setupTasks();
-
-    // Force progression after 3.5 seconds
-    setTimeout(() => {
+      // Success! Move to final step
       setStep("complete");
       setIsLoading(false);
 
+      // Redirect after showing "Success" message
       setTimeout(() => {
         navigate("/", { replace: true });
-        setTimeout(() => {
-          if (window.location.pathname === "/profile-setup") {
-            window.location.href = "/";
-          }
-        }, 1000);
-      }, 1500);
-    }, 3500);
+      }, 2000);
+
+    } catch (e: any) {
+      console.error("Setup failed:", e);
+      toast({
+        title: "Setup Failed",
+        description: e.message || "Something went wrong while saving your profile",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+    }
   };
 
   return (

@@ -46,10 +46,11 @@ const PROFILE_FETCH_TIMEOUT_MS = 4000;
 
 // ─── Direct REST helper (bypasses Supabase JS client & RLS hangs) ───────────
 
+// Update fetchProfileViaREST to return more info
 async function fetchProfileViaREST(
   userId: string,
   accessToken: string
-): Promise<Record<string, any> | null> {
+): Promise<{ data: Record<string, any> | null; error: boolean; status: number }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROFILE_FETCH_TIMEOUT_MS);
 
@@ -70,14 +71,17 @@ async function fetchProfileViaREST(
 
     if (!response.ok) {
       console.error("REST profile fetch failed:", response.status, response.statusText);
-      return null;
+      return { data: null, error: true, status: response.status };
     }
 
     const rows = await response.json();
-    if (Array.isArray(rows) && rows.length > 0) {
-      return rows[0];
+    if (Array.isArray(rows)) {
+      if (rows.length > 0) {
+        return { data: rows[0], error: false, status: 200 };
+      }
+      return { data: null, error: false, status: 200 }; // Definitely not found
     }
-    return null; // no profile row found
+    return { data: null, error: true, status: response.status };
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === "AbortError") {
@@ -85,7 +89,7 @@ async function fetchProfileViaREST(
     } else {
       console.error("REST profile fetch error:", err);
     }
-    return null;
+    return { data: null, error: true, status: 0 };
   }
 }
 
@@ -104,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const accessToken = currentSession.access_token;
 
     // Step 1: Try to read profile via direct REST (immune to RLS hangs)
-    const data = await fetchProfileViaREST(supabaseUser.id, accessToken);
+    const { data, error, status } = await fetchProfileViaREST(supabaseUser.id, accessToken);
 
     if (data) {
       // Profile exists — map it
@@ -140,9 +144,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Step 2: REST returned null — either timed out, RLS blocked, or new user.
-    // Try to create a new profile (upsert on conflict).
-    console.log("📝 No profile found via REST. Attempting upsert for new user...");
+    // Step 2: Handle cases where profile was not found vs error
+    if (error) {
+      console.warn("⚠️ Profile fetch failed but we won't overwrite status. Using fallback local profile.");
+      // If we have an existing local profile that is complete, don't overwrite it with incomplete state
+      if (user?.profile_complete) return;
+
+      // Otherwise set a minimal profile but don't force profile_complete = false if we don't know
+      setUser({
+        id: supabaseUser.id,
+        email: supabaseUser.email || "",
+        name: supabaseUser.user_metadata?.full_name || "User",
+        trust_score: 4.0,
+        profile_complete: false, // Defaulting to false for now, but dangerous if it's just a timeout
+        identity_verified: false,
+      });
+      return;
+    }
+
+    // Step 3: REST returned 200 OK with empty array -> Definitely a new user
+    console.log("📝 No profile found. Creating new profile for new user...");
 
     const newProfile: Profile = {
       id: supabaseUser.id,
@@ -153,7 +174,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       identity_verified: false,
     };
 
-    // Use direct REST for the upsert too, to avoid the same RLS hang
     try {
       const upsertUrl = `${SUPABASE_URL}/rest/v1/profiles`;
       const upsertController = new AbortController();
@@ -182,18 +202,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (upsertResp.ok) {
         console.log("✅ New profile created via REST upsert");
       } else {
-        console.warn("⚠️ Profile upsert returned:", upsertResp.status, await upsertResp.text());
+        console.warn("⚠️ Profile upsert response:", upsertResp.status);
       }
     } catch (upsertErr: any) {
-      if (upsertErr.name === "AbortError") {
-        console.warn("⏰ Profile upsert timed out");
-      } else {
-        console.error("❌ Profile upsert error:", upsertErr);
-      }
+      console.error("❌ Profile upsert error:", upsertErr);
     }
 
     setUser(newProfile);
-    console.log("🆕 Set new user profile (profile_complete = false)");
+    console.log("🆕 Set new user profile");
   };
 
   // ──── Auth initialization ──────────────────────────────────────────────
